@@ -14,6 +14,8 @@ from small_functions import trilinear_interpolation, auto_trilinear_interpolatio
 from Green import get_grad_source_potential, get_source_potential
 from small_functions import for_boundary_get_normal, append_sparse
 
+from assembly import Assembly_diffusion_3D_boundaries, Assembly_diffusion_3D_interior
+
 import scipy as sp
 
 class hybrid_set_up():
@@ -33,11 +35,156 @@ class hybrid_set_up():
         
         return
     
+    def Assembly_problem(self):
+        size=self.mesh_3D.size_mesh
+        
+        a=Assembly_diffusion_3D_interior(self.mesh_3D)
+        b=Assembly_diffusion_3D_boundaries(self.mesh_3D, self.BC_type, self.BC_value)
+        
+        A_matrix=sp.sparse.csc_matrix((a[2], (a[0], a[1])), shape=(size,size)) + sp.sparse.csc_matrix((b[2], (b[0], b[1])), shape=(size, size))
+        
+        
+        self.ind_array=b[3]
+        
+        self.A_matrix=A_matrix
+        
+        B_matrix=self.Assembly_B()
+        self.B_matrix=B_matrix
+        
+        return
+    
+    def Assembly_A(self):
+        return
+    
+    def Assembly_B(self):
+        """Assembly of the B matrix i.e. computation of the arrays J_k_m and 
+        adding them to the B matrix"""
+        B=sp.sparse.csc_matrix((0, len(self.mesh_1D.s_blocks)))
+        for k in range(self.mesh_3D.size_mesh):
+            N_k= self.mesh_3D.ordered_connect_matrix[k] #Set with all the neighbours
+            
+            J_k=0
+            for m in N_k:
+                J_k+=self.get_J_k_m(k,m)
+            B=sp.sparse.vstack((B, J_k))
+        
+        return B
+
+            
+# =============================================================================
+#     def Assembly_B_boundaries(self, BC_value, BC_type):
+# 
+#         B=self.B.tolil()
+#         
+#         
+#         return(row_array, col_array, data_array, BC_array)      
+# =============================================================================
+        
+    def Assembly_D_E_F(self):
+# =============================================================================
+#         row_D=np.array([], dtype=int)
+#         col_D=np.array([], dtype=int)
+#         data_D=np.array([])        
+#         
+#         row_E=np.array([], dtype=int)
+#         col_E=np.array([], dtype=int)
+#         data_E=np.array([])      
+#         
+#         row_F=np.array([], dtype=int)
+#         col_F=np.array([], dtype=int)
+#         data_F=np.array([])   
+# =============================================================================
+        
+        D=np.zeros([3,0])
+        E=np.zeros([3,0])
+        F=np.zeros([3,0])
+        
+   
+        
+        for j in range(len(self.mesh_1D.s_blocks)):
+            kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=self.interpolate(self.mesh_1D.pos_s)
+            D=append_sparse(D, kernel_s,np.zeros(len(col_s))+j, col_s)
+            
+            E=append_sparse(E, kernel_q,np.zeros(len(col_q))+j, col_q)
+            
+            F=append_sparse(F, kernel_C_v,np.zeros(len(col_C_v))+j, col_C_v)
+            
+            E=append_sparse(E, self.K , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
+            
+            E=append_sparse(F, np.ones(len(self.mesh_1D.s_blocks)) , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
+            
+            
+        return 
+    
+    def get_coord_reconst(self,corners, resolution):
+        """Corners given in order (0,0),(0,1),(1,0),(1,1)"""
+        crds=np.zeros((0,3))
+        tau=(corners[2]-corners[0])/resolution
+        
+        h=(corners[1]-corners[0])/resolution
+        L_h=np.linalg.norm((corners[1]-corners[0]))
+        
+        local_array= np.linspace(corners[0]+h/2, corners[1]-h/2 , resolution )
+        for j in range(resolution):
+            arr=local_array.copy()
+            arr[:,0]+=tau[0]*(j+1/2)
+            arr[:,1]+=tau[1]*(j+1/2)
+            arr[:,2]+=tau[2]*(j+1/2)
+            
+            crds=np.vstack((crds, arr))
+        
+        rec=np.array([])
+        for k in crds:
+            a,b,c,d,e,f=self.interpolate(k)
+            rec=np.append(rec,a.dot(self.s[b])+c.dot(self.q[d]))
+            
+        return crds, rec
+            
+        
+        
+    
+    def rec_along_mesh(self,axis, crds_along_axis, s_field, q, C_v_array):
+        
+        mesh=self.mesh_3D
+        net=self.mesh_1D
+        
+        if axis=="x":
+            array=mesh.get_x_slice(crds_along_axis)
+            cells=mesh.cells_z, mesh.cells_y
+            names="z","y"
+        elif axis=="y":
+            array=mesh.get_y_slice(crds_along_axis)
+            cells=mesh.cells_z, mesh.cells_x
+            names="z","x"
+        elif axis=="z":
+            array=mesh.get_z_slice(crds_along_axis)
+            cells=mesh.cells_y, mesh.cells_x
+            names="y","x"
+            
+            
+        sol=np.array([])
+        for k in array:
+            a,b,c,d,e,f=self.interpolate(mesh.get_coords(k))
+# =============================================================================
+#             if np.sum(d):
+#                 sol=np.append(sol,a.dot(s_field[b])+c.dot(q[d]))
+#             else:
+#                 sol=np.append(sol,a.dot(s_field[b]))
+# =============================================================================
+            #sol=np.append(sol,a.dot(s_field[b]))
+            
+            if np.sum(d):
+                sol=np.append(sol,c.dot(q[d]))
+                #if k not in get_neighbourhood(self.n, mesh.cells_x,mesh.cells_y,mesh.cells_z, net.s_blocks[0]): pdb.set_trace()
+            else:
+                sol=np.append(sol,0)
+        
+        return sol.reshape(cells), names
+    
     def interpolate(self, x):
         """returns the kernels to obtain an interpolation on the point x. 
         In total it will be 6 kernels, 3 for columns and 3 with data for s, q, and
         C_v respectively"""
-
         bound_status=self.get_bound_status(x)
         if len(bound_status): #boundary interpolation
             #if x[0]>1 and x[1]<0.5:pdb.set_trace()
@@ -67,7 +214,7 @@ class hybrid_set_up():
                 nodes[c].block_3D=self.mesh_3D.get_id(nodes[c].coords)
                 dual_neigh=np.concatenate((dual_neigh, nodes[c].neigh))
                 c+=1
-        
+        #if np.all(x==np.array([1.5, 4.5, 2.5])): pdb.set_trace()
         return self.get_interp_kernel(x,nodes, np.unique(dual_neigh))
     
     def get_interp_kernel(self,x, nodes, dual_neigh):
@@ -77,8 +224,9 @@ class hybrid_set_up():
         
         #INTERPOLATED PART:
         #kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=self.get_I_1(x, nodes, dual_neigh)
-        kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=get_I_1(x,nodes, dual_neigh, self.K, self.D,
+        self.nodes,kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=get_I_1(x,nodes, dual_neigh, self.K, self.D,
                                                                     self.mesh_3D.h, self.mesh_1D)
+        
         #kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=np.array([]),np.array([]),np.array([]),np.array([]),np.array([]),np.array([])
         #RAPID (NON INTERPOLATED) PART
         q,C,sources=self.mesh_1D.kernel_point(x, dual_neigh, get_source_potential, self.K, self.D)
@@ -88,56 +236,10 @@ class hybrid_set_up():
         col_C_v=np.concatenate((col_C_v, sources))
         
         
-        return kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
+        return kernel_s,col_s.astype(int),kernel_q, col_q.astype(int),kernel_C_v,  col_C_v.astype(int)
     
     
-    def get_I_1(self, x,nodes, dual_neigh):
-        """Returns the kernels of the already interpolated part, il reste juste ajouter
-        le term rapide corrigé
-            - x is the point where the concentration is interpolated"""
-        
-        if len(nodes)==8:
-            
-            weights=trilinear_interpolation(x, np.array([self.h, self.h, self.h]))
-            if np.any(weights<0): pdb.set_trace()
-            kernel_q=np.array([])
-            kernel_C_v=np.array([])
-            kernel_s=np.array([])
-            col_q=np.array([], dtype=int)
-            col_C_v=np.array([], dtype=int)
-            col_s=np.array([], dtype=int)
-            for i in range(8): #Loop through each of the nodes
-               
-                U=get_uncommon(dual_neigh, nodes[i].neigh) 
-                #The following variable will contain the data kernel for q, the data kernel
-                #for C_v and the col kernel i.e. the sources 
-                a=self.mesh_1D.kernel_point(x, U, get_source_potential, self.K, self.D)
-                
-                nodes[i].kernel_q=np.concatenate((nodes[i].kernel_q, a[0]))
-                nodes[i].kernel_C_v=np.concatenate((nodes[i].kernel_C_v, a[1]))
-                
-                nodes[i].col_q=np.concatenate((nodes[i].col_q, a[2]))
-                if np.any(a[1]): 
-                    nodes[i].col_C_v=np.concatenate((nodes[i].col_C_v, a[2]))
-                
-                nodes[i].kernel_s=np.array([1], dtype=float)
-                nodes[i].col_s=np.array([nodes[i].block_3D])
-                
-                #This operation is a bit redundant
-                nodes[i].multiply_by_value(weights[i])
-                
-                kernel_q=np.concatenate((kernel_q, nodes[i].kernel_q))
-                kernel_C_v=np.concatenate((kernel_C_v, nodes[i].kernel_C_v))
-                kernel_s=np.concatenate((kernel_s, nodes[i].kernel_s))
-                
-                col_q=np.concatenate((col_q, nodes[i].col_q))
-                col_C_v=np.concatenate((col_C_v, nodes[i].col_C_v))
-                col_s=np.concatenate((col_s, nodes[i].col_s))
-            return kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
-        
-        else: #There are not 8 nodes cause it lies in the boundary so there is no interpolation
-            return np.array([1]), np.array([nodes[0].block_3D]), np.array([]), np.array([]), np.array([]),np.array([])
-        
+
     
   
     def get_bound_status(self, coords):
@@ -152,157 +254,7 @@ class hybrid_set_up():
         
         return bound_status
     
-# =============================================================================
-#     def construct_dual_cube(self, coords, bound_status):
-#         """This function constructs the cube by initiliazing the 8 nodes composing 
-#         the dual cube.
-#         The function returns the nodes where each of them will contain as internal variables:
-#             - The position
-#             - the local coordinates (WHICH I'M NOT SURE ARE USED AFTEWARDS)
-#             - Wether it is a boundary or not"""
-#         k=self.mesh_3D.get_id(coords) #Nearest cartesian node
-#         
-#         x_k=self.mesh_3D.get_coords(k)
-#         #The following vector gives the direction from x_k that the cube has to be constructed
-#         d=np.array((np.sign(coords-x_k)+1)/2).astype(int) 
-#         #For each direction d is 0 if against the axis and 1 otherwise
-#         
-#         direction=np.array([[1,0],
-#                             [3,2],
-#                             [5,4]]) [[0,1,2],[d]][0]
-#         h_array=np.array([[0,0,self.h],
-#                     [0,0,-self.h],
-#                     [0,self.h,0],
-#                     [0,-self.h,0],
-#                     [self.h,0,0],
-#                     [-self.h,0,0]])
-#         
-#         h_array[bound_status]/=2
-#         h_plus=h_array[direction] #the signed distance on each direction for dual cube
-#         
-#         #We want an array that which one of the three directions (0, 1 or 2) points to a boundary
-#         #0 for the z direction, 1 for the y direction, 2 for the x direction
-#         dir_boundary=np.where(np.abs(h_plus[np.arange(3), np.array([2,1,0])])<self.h-1e-7)[0]
-#         bound_dir=np.zeros(3, dtype=int)-1
-#         for i in dir_boundary: #loop through each of the directions where we encounter a boundary 
-#         #len(dir_boundary)= 0 if no boundary, =1 if boundary, =2 if edge, =3 if corner
-#             bound_dir[i]=d[i]
-#             
-#             
-#         #Now we have an array that for each direction: -1 if no boundary
-#                                               #0 if boundary in the negative direction of the axis
-#                                               #1 if boundary in the positive direction
-#         #So dir boundary indicates which one of the three axis contains a boundary
-#         #bound_dir contains the complementary information of the direction where the boundary lies
-#         nodes=np.array([])
-#         local_coords=np.array([[0,0,0]])
-#         
-#         nodes=np.append(nodes, node(x_k, 0))
-#         
-#         nodes=np.append(nodes, node(x_k+h_plus[0], 1))
-#         nodes[1].bound=np.append(nodes[1].bound, [1,0,-1][bound_dir[0]]) #[1,0,-1]=['south', 'north', 'no_bound']
-#         
-#         nodes=np.append(nodes, node(x_k+h_plus[1], 2))
-#         nodes[2].bound=np.append(nodes[2].bound, [3,2,-1][bound_dir[1]])
-#         local_coords=np.vstack((local_coords, nodes[2].coords))
-#         
-#         nodes=np.append(nodes, node(x_k+h_plus[2], 3))
-#         nodes[3].bound=np.append(nodes[3].bound, [5,4,-1][bound_dir[2]])
-#         local_coords=np.vstack((local_coords, nodes[3].coords))
-#         
-#         #This ones have to have at least one boundary 
-#         nodes=np.append(nodes, node(x_k+h_plus[0]+h_plus[1], 4))
-#         nodes[4].bound=np.append(nodes[1].bound, nodes[2].bound)
-#         local_coords=np.vstack((local_coords, nodes[4].coords))
-#         
-#         nodes=np.append(nodes, node(x_k+h_plus[0]+h_plus[2], 5))
-#         nodes[5].bound=np.append(nodes[1].bound, nodes[3].bound)
-#         local_coords=np.vstack((local_coords, nodes[5].coords))
-# 
-#         nodes=np.append(nodes, node(x_k+h_plus[1]+h_plus[2], 6))
-#         nodes[6].bound=np.append(nodes[2].bound, nodes[3].bound)
-#         local_coords=np.vstack((local_coords, nodes[6].coords))
-#         
-#         nodes=np.append(nodes, node(x_k+h_plus[0]+h_plus[1]+h_plus[2], 7))
-#         nodes[7].bound=np.concatenate((nodes[1].bound,nodes[2].bound, nodes[3].bound))
-#         local_coords=np.vstack((local_coords, nodes[7].coords))
-#         
-#         return nodes
-#     
-#     def get_cube_boundary_slow_values(self, nodes):
-#         """This function records in each node object the three kernels to multiply 
-#         the unknowns by to obtain the slow term value at that node.
-#         At the end of the function, each node has also stored its neighbourhood
-#         as an internal variable, together with the 3 data kernels and the 3 col kernels
-#         """
-#         
-#         
-#         direct=np.array([[1,2,3],
-#                          [0,4,5],
-#                          [4,0,6],
-#                          [5,6,0],
-#                          [2,1,7],
-#                          [3,7,1],
-#                          [7,3,0],
-#                          [6,5,4]])
-#         
-#         #This following nodes cannot fall within an edge nor a corner
-#         cc=0
-#         for i in nodes[1:4]:
-#             cc+=1
-#             i.block_3D=self.mesh_3D.get_id(i.coords)
-#             i.neigh=get_neighbourhood(self.n, self.mesh_3D.cells_x, 
-#                                              self.mesh_3D.cells_y, 
-#                                              self.mesh_3D.cells_z, 
-#                                              i.block_3D)
-#             
-#             #To review these coeffs!!
-#             i.kernel_s=np.append(i.kernel_s, 1)
-#             i.col_s=np.append(i.col_s, self.mesh_3D.get_id(i.coords))
-#             
-#             if np.sum(i.bound > -1)>0: #Only one can be true
-#                 #normal=(i.coords-nodes[0].coords)/np.linalg.norm(i.coords-nodes[0].coords)
-#                 normal=for_boundary_get_normal(int(i.bound[i.bound > -1]))
-#                  
-#                 a,b=self.get_values_boundary_nodes(normal, i)
-#                 i.kernel_q=np.concatenate((i.kernel_q, a))
-#                 i.col_q=np.concatenate((i.col_q, b))
-# 
-#             
-#             
-#         for i in nodes[4:]: #This ones can have multiple boundaries
-#             cc+=1
-#             i.block_3D=self.mesh_3D.get_id(i.coords)
-#             i.neigh=get_neighbourhood(self.n, self.mesh_3D.cells_x, 
-#                                              self.mesh_3D.cells_y, 
-#                                              self.mesh_3D.cells_z, 
-#                                              i.block_3D)
-#             
-#             #To review these coeffs!!
-#             if np.sum(i.bound > -1)==1: #Only one boundary
-#                 #normal=(i.coords-nodes[0].coords)/np.linalg.norm(i.coords-nodes[0].coords)
-#                 normal=for_boundary_get_normal(int(i.bound[i.bound > -1]))
-#                  
-#                 one, two, three, four=self.get_values_boundary_nodes(normal, i)
-#                 
-#                 i.kernels_append([one, two, three, four, np.array([]), np.array([])])
-#                 
-#                 
-#             else: #Multiple boundaries
-#                 i.bound//2 #The neighbourhoods it shares
-#                 for m in i.bound//2:
-#                     i.kernel_q=np.concatenate((i.kernel_q,nodes[direct[i.ID, m]].kernel_q))
-#                     i.col_q=np.concatenate((i.col_q,nodes[direct[i.ID, m]].col_q))
-#                     
-#                     i.kernels_append([nodes[direct[i.ID, m]].kernel_s, nodes[direct[i.ID, m]].col_s, 
-#                                       nodes[direct[i.ID, m]].kernel_q, nodes[direct[i.ID, m]].col_q, 
-#                                       np.array([]), np.array([])])
-#                     # 
-#                     
-#                 i.kernel_q/=len(i.bound)
-#                 i.kernel_s/=len(i.bound)
-#         return nodes
-# =============================================================================
+
     
             
     def get_values_boundary_nodes(self,normal, node):
@@ -356,80 +308,85 @@ class hybrid_set_up():
         
         normal=(pos_m-pos_k)/mesh.h
         
-        r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2,normal, mesh.h, get_uncommon(k_neigh, m_neigh), get_source_potential, net.K,self.D)
-        r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2,normal, mesh.h, get_uncommon(m_neigh, k_neigh), get_source_potential, net.K,self.D)
         
-        grad_r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2,normal, mesh.h, get_uncommon(k_neigh, m_neigh), get_grad_source_potential, net.K,self.D)
-        grad_r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2,normal, mesh.h, get_uncommon(m_neigh, k_neigh), get_grad_source_potential, net.K,self.D)
+        r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2, normal,  get_uncommon(k_neigh, m_neigh), get_source_potential, self.K,self.D)
+        r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2, normal,  get_uncommon(m_neigh, k_neigh), get_source_potential, self.K,self.D)
+        
+        #if np.sum(r_m_k[0]) and np.sum(r_k_m[0]): pdb.set_trace()
+        
+        grad_r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2, normal, get_uncommon(k_neigh, m_neigh), get_grad_source_potential, self.K,self.D)
+        grad_r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2, normal, get_uncommon(m_neigh, k_neigh),  get_grad_source_potential, self.K,self.D)
+        
         
         return(sp.sparse.csc_matrix((r_k_m[0]*h**2,(np.zeros(len(r_k_m[0])),r_k_m[1])), shape=(1,len(net.s_blocks))),
                sp.sparse.csc_matrix((grad_r_k_m[0]*h**2 ,(np.zeros(len(grad_r_k_m[1])), grad_r_k_m[1])),shape=(1,len(net.s_blocks))),
                sp.sparse.csc_matrix((r_m_k[0]*h**2,(np.zeros(len(r_m_k[0])),r_m_k[1])), shape=(1,len(net.s_blocks))),
-               sp.sparse.csc_matrix((grad_r_m_k[0]*h**2 ,(np.zeros(len(grad_r_m_k)), grad_r_m_k[1])),shape=(1,len(net.s_blocks)))
+               sp.sparse.csc_matrix((grad_r_m_k[0]*h**2 ,(np.zeros(len(grad_r_m_k[1])), grad_r_m_k[1])),shape=(1,len(net.s_blocks)))
                )
     
     def get_J_k_m(self, k ,m):
         h=self.mesh_3D.h
         #The following returns the already integrated kernels
+        
         rkm, grad_rkm, rmk, grad_rmk = self.get_interface_kernels(k,m)
         
-        return (grad_rmk - grad_rkm)/2/h + (rmk - rkm)/h**2 #This is a line sparse array 
+        #return (grad_rmk - grad_rkm)/2/h + (rmk - rkm)/h**2 #This is a line sparse array 
+        
+        #REMOVE THE FOLLOWING AND REINSTATE THE PREVIOUS
+        return  (rmk - rkm)/h**2 #This is a line sparse array 
     
-    def Assembly_B(self):
-        """Assembly of the B matrix i.e. computation of the arrays J_k_m and 
-        adding them to the B matrix"""
-        B=sp.sparse.csc_matrix((0, len(self.mesh_1D.s_blocks)))
-        for k in self.mesh_3D.size_mesh:
-            N_k= self.mesh_1D.ordered_connect_matrix[k] #Set with all the neighbours
-            
-            J_k=0
-            for m in N_k:
-                J_k+=self.get_J_k_m(k,m)
-            B=sp.sparse.vstack((B, J_k))
-        
-        return B
-
-            
 # =============================================================================
-#     def Assembly_B_boundaries(self, BC_value, BC_type):
-# 
-#         B=self.B.tolil()
+#     def get_I_1(self, x,nodes, dual_neigh):
+#         """Returns the kernels of the already interpolated part, il reste juste ajouter
+#         le term rapide corrigé
+#             - x is the point where the concentration is interpolated"""
 #         
+#         if len(nodes)==8:
+#             
+#             weights=trilinear_interpolation(x, np.array([self.h, self.h, self.h]))
+#             if np.any(weights<0): pdb.set_trace()
+#             kernel_q=np.array([])
+#             kernel_C_v=np.array([])
+#             kernel_s=np.array([])
+#             col_q=np.array([], dtype=int)
+#             col_C_v=np.array([], dtype=int)
+#             col_s=np.array([], dtype=int)
+#             for i in range(8): #Loop through each of the nodes
+#             
+#                 #This is to debug:
+#                 #nodes[i].weight=weights[i]
+#             
+#                 U=get_uncommon(dual_neigh, nodes[i].neigh) 
+#                 #The following variable will contain the data kernel for q, the data kernel
+#                 #for C_v and the col kernel i.e. the sources 
+#                 a=self.mesh_1D.kernel_point(x, U, get_source_potential, self.K, self.D)
+#                 
+#                 nodes[i].kernel_q=np.concatenate((nodes[i].kernel_q, a[0]))
+#                 nodes[i].kernel_C_v=np.concatenate((nodes[i].kernel_C_v, a[1]))
+#                 
+#                 nodes[i].col_q=np.concatenate((nodes[i].col_q, a[2]))
+#                 if np.any(a[1]): 
+#                     nodes[i].col_C_v=np.concatenate((nodes[i].col_C_v, a[2]))
+#                 
+#                 nodes[i].kernel_s=np.array([1], dtype=float)
+#                 nodes[i].col_s=np.array([nodes[i].block_3D])
+#                 
+#                 #This operation is a bit redundant
+#                 nodes[i].multiply_by_value(weights[i])
+#                 
+#                 kernel_q=np.concatenate((kernel_q, nodes[i].kernel_q))
+#                 kernel_C_v=np.concatenate((kernel_C_v, nodes[i].kernel_C_v))
+#                 kernel_s=np.concatenate((kernel_s, nodes[i].kernel_s))
+#                 
+#                 col_q=np.concatenate((col_q, nodes[i].col_q))
+#                 col_C_v=np.concatenate((col_C_v, nodes[i].col_C_v))
+#                 col_s=np.concatenate((col_s, nodes[i].col_s))
+#             return kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
 #         
-#         return(row_array, col_array, data_array, BC_array)      
+#         else: #There are not 8 nodes cause it lies in the boundary so there is no interpolation
+#             return np.array([1]), np.array([nodes[0].block_3D]), np.array([]), np.array([]), np.array([]),np.array([])
+#         
 # =============================================================================
-        
-    def Assembly_D_E_F(self):
-        row_D=np.array([], dtype=int)
-        col_D=np.array([], dtype=int)
-        data_D=np.array([])        
-        
-        D=np.zeros([3,0])
-        E=np.zeros([3,0])
-        F=np.zeros([3,0])
-        
-        row_E=np.array([], dtype=int)
-        col_E=np.array([], dtype=int)
-        data_E=np.array([])      
-        
-        row_F=np.array([], dtype=int)
-        col_F=np.array([], dtype=int)
-        data_F=np.array([])      
-        
-        for j in range(len(self.mesh_1D.s_blocks)):
-            kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=self.interpolate(self.mesh_1D.pos_s)
-            D=append_sparse(D, kernel_s,np.zeros(len(col_s))+j, col_s)
-            
-            E=append_sparse(E, kernel_q,np.zeros(len(col_q))+j, col_q)
-            
-            F=append_sparse(F, kernel_C_v,np.zeros(len(col_C_v))+j, col_C_v)
-            
-            E=append_sparse(E, self.K , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
-            
-            E=append_sparse(F, np.ones(len(self.mesh_1D.s_blocks)) , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
-            
-            
-        return 
     
         
         
@@ -454,8 +411,8 @@ def get_I_1(x,nodes, dual_neigh, K, D, h_3D, mesh_1D_object):
             #The following variable will contain the data kernel for q, the data kernel
             #for C_v and the col kernel i.e. the sources 
             a=mesh_1D_object.kernel_point(x, U, get_source_potential, K, D)
-            
-            nodes[i].kernel_q=np.concatenate((nodes[i].kernel_q, a[0]))
+            ######## Changed sign on a[0] 26 mars 18:08
+            nodes[i].kernel_q=np.concatenate((nodes[i].kernel_q, -a[0]))
             nodes[i].kernel_C_v=np.concatenate((nodes[i].kernel_C_v, a[1]))
             
             nodes[i].col_q=np.concatenate((nodes[i].col_q, a[2]))
@@ -475,10 +432,10 @@ def get_I_1(x,nodes, dual_neigh, K, D, h_3D, mesh_1D_object):
             col_q=np.concatenate((col_q, nodes[i].col_q))
             col_C_v=np.concatenate((col_C_v, nodes[i].col_C_v))
             col_s=np.concatenate((col_s, nodes[i].col_s))
-        return kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
+        return nodes, kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
     
     else: #There are not 8 nodes cause it lies in the boundary so there is no interpolation
-        return np.array([1]), np.array([nodes[0].block_3D]), np.array([]), np.array([]), np.array([]),np.array([])
+        return nodes, np.array([1]), np.array([nodes[0].block_3D]), np.array([]), np.array([]), np.array([]),np.array([])
             
     
         
@@ -505,7 +462,7 @@ class node():
     def multiply_by_value(self, value):
         """This function is used when we need to multiply the value of the node 
         but when working in kernel form """
-
+        self.weight=value
         self.kernel_q*=value
         self.kernel_C_v*=value
         self.kernel_s*=value

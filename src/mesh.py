@@ -396,10 +396,10 @@ class cart_mesh_3D():
         ordered_connect_matrix=[]
         for k in range(self.size_mesh):
             if k in self.full_boundary:
-                ordered_connect_matrix = ordered_connect_matrix.append(np.array(self.connect_list[np.where(self.full_boundary==k)[0]]))
+                ordered_connect_matrix = ordered_connect_matrix + [self.connect_list[np.where(self.full_boundary==k)[0][0]]]
             else:
-                ordered_connect_matrix= ordered_connect_matrix.append(self.get_diff_stencil(k))                
-        self.ordered_connect_matrix=ordered_connect_matrix
+                ordered_connect_matrix = ordered_connect_matrix + [self.get_diff_stencil(k).tolist()]
+        self.ordered_connect_matrix = ordered_connect_matrix
         return ordered_connect_matrix
     
     def get_x_slice(self, crds):

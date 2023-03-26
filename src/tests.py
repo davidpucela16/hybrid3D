@@ -45,7 +45,8 @@ plt.colorbar()
 
 
 #%% - 
-
+import os 
+os.chdir(os.path.dirname(__file__))
 from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
@@ -53,10 +54,13 @@ from scipy.sparse.linalg import spsolve as dir_solve
 from scipy.sparse.linalg import bicg
 
 #%%
+
+
+
 BC_type=np.array(["Neumann", "Dirichlet", "Neumann","Neumann","Neumann","Neumann"])
 BC_value=np.array([1,0,0,0,0,0])
 
-sq_cells=50
+sq_cells=20
 
 L=np.array([10,10,10])
 
@@ -72,10 +76,9 @@ sol=dir_solve(A_matrix, b[-1])
 #%%
 sol=bicg(A_matrix, b[-1])
 #%%
-
-pp=mesh.get_x_slice(np.array([5,0,0])).astype(int)
-qq=mesh.get_y_slice(np.array([5,5,0])).astype(int)
-rr=mesh.get_z_slice(np.array([5,5,5])).astype(int)
+pp=mesh.get_x_slice(L[0]/2).astype(int)
+qq=mesh.get_y_slice(L[0]/2).astype(int)
+rr=mesh.get_z_slice(L[0]/2).astype(int)
 
 #%%
 plt.imshow(sol[pp].reshape(sq_cells, sq_cells), origin='lower')

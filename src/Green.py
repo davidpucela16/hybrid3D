@@ -78,7 +78,8 @@ def get_grad_source_potential( tup_args, D):
     tau=(b-a)/np.linalg.norm(b-a)
     x_j=(a+b)/2
     #The second empty array that is returned is the corresponding to the C_v
-    return grad_point((x,x_j))/(4*np.pi*D), np.array([])
+    return np.linalg.norm(b-a)*grad_point((x,x_j))/(4*np.pi*D), np.array([])
+    #I have multiplied the grad point by the length of the segment, Im pretty sure it needs to be done to be consistent dimensionally 
 
 
 def Simpson_surface(arg, function, center, h, normal, D):
@@ -128,7 +129,7 @@ def Simpson_surface(arg, function, center, h, normal, D):
             pos=center+corr[i,0]*tau_1+corr[i,1]*tau_2
             tup_args=a,b,pos,R,K
             #The function returns two kernels that cannot be multiplied 
-            _,w_integral=function(tup_args, D)
+            w_integral,_=function(tup_args, D)
             integral+=w_integral*w_i[i]
     elif function==get_grad_source_potential:
         
@@ -144,7 +145,7 @@ def Simpson_surface(arg, function, center, h, normal, D):
 
 def unit_test_Simpson(h,D):
     normal=np.array([0,1,0])
-    a=np.dot(Simpson_surface(np.array([0,0,0]), grad_point, np.array([0,h/2,0]),h, normal, D),normal)*h**2
+    a=np.dot(Simpson_surface(np.array([0,0,0]), grad_point, np.array([0,h/2,0]),h, normal, D)[0],normal)*h**2
     #The following is the exact result of the Simpson's integration done by hand (notebook)
     print("Analytical Simpson= ", -(27**-0.5+2**0.5+4)/(9*np.pi*D))
     #The following is the value returned by the function 
@@ -163,8 +164,7 @@ def get_self_influence(R,L, D):
     x1=np.array([0,R,0])
     x2=np.array([0,R,L/2])
     x3=np.array([0,R,L])
-    G1=log_line((x1,a,b), D)
-    G2=log_line((x2,a,b), D)
-    G3=log_line((x3,a,b), D)
-    
-    return 2*np.pi*R*L*(G1+4*G2+G3)/6
+    G1=log_line((x1,a,b))
+    G2=log_line((x2,a,b))
+    G3=log_line((x3,a,b))
+    return (G1+4*G2+G3)/6/(4*np.pi*D)
