@@ -21,11 +21,11 @@ class mesh_1D():
            - pos_vertex is the position in the three dimensions of each vertex
            - h is the discretization size of the 1D mesh
            - R is the array of radii for each edge
-           - K is the effective diffusivity of each vessel wall"""
+           """
         
         L=np.sum((pos_vertex[endVertex] - pos_vertex[startVertex])**2, axis=1)**0.5
         self.L=L
-        h=L/np.array(L/h, dtype=int)
+        h=L/np.around(L/h)
         self.h=h
         self.tau=np.divide((pos_vertex[endVertex] - pos_vertex[startVertex]).T,L).T
         self.edges=np.arange(len(startVertex)) #Total number of edges in the network
@@ -103,16 +103,18 @@ class mesh_1D():
             a,b= self.pos_s[i]-tau*self.h[ed]/2, self.pos_s[i]+tau*self.h[ed]/2
             
             
-            if (( np.dot(x-a, tau)>0 ) and ( np.dot(x-a, tau)<self.h[ed] ) and ( np.cross(x-a, tau)<self.R[ed])):
-                
-                q=get_self_influence(self.R[ed], self.h[ed], self.D)
+            if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-a, tau)**2<(self.h[ed]+self.R[ed])**2) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
+                q=get_self_influence(self.R[ed], self.h[ed], D)
                 C=0
+                
                 
             else:
                 q,C=function((a,b,x, self.R[ed], K[ed]),D)
                 ########################
                 #Coefficients due to geometry are already added!
                 ########################
+                #if q>1: pdb.set_trace()
+                
             q_array=np.append(q_array, q)
             C_v_array=np.append(C_v_array, C)
         
@@ -132,12 +134,11 @@ class mesh_1D():
         for i in sources:
             ed=self.source_edge[i]
             a,b= self.pos_s[i]-self.tau[ed]*self.h[ed]/2, self.pos_s[i]+self.tau[ed]*self.h[ed]/2
-            q,C=Simpson_surface((a,b, self.R[ed], K[ed]),function, center,self.h[ed], normal,D)
+            q=Simpson_surface((a,b, self.R[ed], K[ed]),function, center,self.h[ed], normal,D)
             ########################
             #Coefficients due to geometry are already added!
             ########################
             q_array=np.append(q_array, q)
-            C_v_array=np.append(C_v_array, C)
         
         #Return q_kernel_data, C_v_kernel_dat
         return q_array,  sources
