@@ -55,8 +55,8 @@ from neighbourhood import get_neighbourhood, get_uncommon
 BC_type=np.array(["Dirichlet", "Dirichlet", "Dirichlet","Dirichlet","Dirichlet","Dirichlet"])
 BC_value=np.array([0,0,0,0,0,0])
 
-cells=9
-n=3
+cells=5
+n=1
 L=np.array([9,9,9])
 mesh=cart_mesh_3D(L,cells)
 
@@ -64,11 +64,11 @@ mesh.assemble_boundary_vectors()
 
 #%
 
-startVertex=np.array([0])
-endVertex=np.array([1])
-pos_vertex=np.array([[L[0]/2, L[0]/2, 0.1],[L[0]/2,L[0]/2, L[0]-0.1]])
-vertex_to_edge=[[0],[0,1,2],[1,],[2]]
-diameters=np.array([0.15])
+startVertex=np.array([0,2])
+endVertex=np.array([1,3])
+pos_vertex=np.array([[L[0]/2, L[0]/2, 0.1],[L[0]/2,L[0]/2, L[0]-0.1],[L[0]/3, L[0]/2, 0.1],[L[0]/3,L[0]/2, L[0]-0.1]])
+vertex_to_edge=[[0],[0],[1],[1]]
+diameters=np.array([0.1, 0.2])
 h=np.array([0.1])
 
 a=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h)
@@ -78,7 +78,7 @@ net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h)
 net.pos_arrays(mesh)
 #%
 
-prob=hybrid_set_up(mesh, a, BC_type, BC_value, n, 1, np.array([math.inf]))
+prob=hybrid_set_up(mesh, a, BC_type, BC_value, n, 1, np.zeros(len(diameters))+math.inf)
 mesh.get_ordered_connect_matrix()
 prob.Assembly_problem()
 
@@ -111,19 +111,41 @@ plt.show()
 
 #%%
 
-res=50
+res=25
 prob.s=sol
 prob.q=q
 one=8.5
 zero=0.5
 mid=4.5
-a,b=prob.get_coord_reconst(np.array([[zero,mid,zero],[zero,mid,one],[one,mid,zero],[one,mid,one]]), res)
-#a,b=prob.get_coord_reconst(np.array([[zero,zero,mid],[zero,one,mid],[one,zero,mid],[one,one,mid]]), res)
+c,d=prob.get_coord_reconst(np.array([[zero,zero,mid],[zero,one,mid],[one,zero,mid],[one,one,mid]]), res)
 #%
-b=b.reshape(res,res)
-plt.imshow(b)
+d=d.reshape(res,res)
+plt.imshow(d)
 plt.title("Fine reconstruction Z plane")
 plt.colorbar()
+
+#%%
+full_reconst=True
+rec_3D=np.empty(res**3)
+g=0
+
+x=np.linspace(L[0]/2/res, L[0]*(1-1/2/res), res)
+y=np.linspace(L[1]/2/res, L[1]*(1-1/2/res), res)
+z=np.linspace(L[2]/2/res, L[2]*(1-1/2/res), res)
+
+if full_reconst:
+    for i in x:
+        for j in y:
+            for k in z:
+                if not g%100: print(g)
+                a,b,c,d,e,f=prob.interpolate(np.array([i,j,k]))
+                rec_3D[g]=a.dot(sol[b])+c.dot(q[d])
+                g+=1             
+
+#%%
+from pyevtk.hl import gridToVTK
+gridToVTK("./visualization/test", x,y,z, cellData = {'julia': rec_3D})
+
 
 #%% - Im gonna interpolate in a finer grid, 1D reconstruction
 
@@ -133,7 +155,7 @@ temp=np.zeros(res)+L[0]/2
 
 array=np.array([])
 for i in range(res):
-    crds=np.array([4.5,y[i],4.5])
+    crds=np.array([y[i],4.5,4.5])
     a,b,c,d,e,f=prob.interpolate(crds)
     
     array=np.append(array,a.dot(sol[b])+c.dot(q[d]))
@@ -153,7 +175,7 @@ A=prob.A_matrix.toarray()
 # =============================================================================
 
 B=np.zeros(cells**3)
-for i in prob.mesh_1D.s_blocks:
+for i in a.s_blocks:
     B[i]+=1
     
 sol=np.linalg.solve(A, -B)
@@ -170,14 +192,14 @@ plt.imshow(sol[m[1]].reshape(cells, cells), origin="lower"); plt.colorbar()
 
 #%%
 cc=0
-for i in get_neighbourhood(n, 10,10,10, prob.mesh_1D.s_blocks[0]):
+for i in get_neighbourhood(n, 10,10,10, a.s_blocks[0]):
     print()
     print(prob.B_matrix[i])
     cc+=np.sum(prob.B_matrix[i].toarray())
 
 #%%
 
-for i in get_uncommon(get_neighbourhood(n+1, 10,10,10, prob.mesh_1D.s_blocks[0]),get_neighbourhood(1, 10,10,10, prob.mesh_1D.s_blocks[0])):
+for i in get_uncommon(get_neighbourhood(n+1, 10,10,10, a.s_blocks[0]),get_neighbourhood(1, 10,10,10, a.s_blocks[0])):
     print()
     print(prob.B_matrix[i])
     cc+=np.sum(prob.B_matrix[i].toarray())
@@ -191,6 +213,17 @@ plt.imshow(a)
 plt.colorbar()
 
 
+
+#%%
+for i in get_neighbourhood(1, 10,10,10, a.s_blocks[0]):
+    print()
+# =============================================================================
+#     print(np.nonzero(A[i]))
+#     print(np.dot(A[i], sol))
+#     print(prob.B_matrix.dot(q)[i])
+#     print(np.dot(Up[i], sol))
+# =============================================================================
+    #print(A[i,np.nonzero(A[i])])
 
 
 #%% - Reconstruction

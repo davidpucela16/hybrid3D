@@ -13,7 +13,6 @@ import scipy as sp
 import scipy.sparse.linalg
 import pdb
 
-#%% - This is the validation of the 1D transport eq without reaction
 U = 1
 D = 1
 L = 10
@@ -26,7 +25,7 @@ Pe = U*L/D
 analytical = (np.exp(Pe*x/L)-np.exp(Pe))/(1-np.exp(Pe))
 
 plt.plot(x, analytical)
-
+# %%
 
 a, b = assemble_transport_1D(U, D, L/cells, cells)
 

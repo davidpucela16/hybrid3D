@@ -56,7 +56,7 @@ BC_type=np.array(["Dirichlet", "Dirichlet", "Dirichlet","Dirichlet","Dirichlet",
 BC_value=np.array([0,0,0,0,0,0])
 
 cells=9
-n=3
+n=2
 L=np.array([9,9,9])
 mesh=cart_mesh_3D(L,cells)
 
@@ -84,6 +84,7 @@ prob.Assembly_problem()
 
 
 #%
+q=np.ones(len(a.pos_s))
 q=np.arange(len(a.pos_s))/len(a.pos_s)
 A=prob.A_matrix.toarray()
 sol=np.linalg.solve(A, -prob.ind_array-prob.B_matrix.dot(q))
@@ -96,18 +97,13 @@ zero=0.5
 mid=4.5
 a,b=prob.get_coord_reconst(np.array([[zero,mid,zero],[zero,mid,one],[one,mid,zero],[one,mid,one]]), res)
 
-#%
+#%%
 k,l,m=get_three_slices(mesh, L)
 plt.imshow(sol[k[1]].reshape(cells, cells), origin="lower") 
 plt.title("slow")
 plt.colorbar()
-plt.show()
 
-b=b.reshape(res,res)
-plt.imshow(b)
-plt.title("Fine reconstruction Y plane")
-plt.colorbar()
-plt.show()
+
 
 #%%
 
@@ -119,12 +115,13 @@ zero=0.5
 mid=4.5
 a,b=prob.get_coord_reconst(np.array([[zero,mid,zero],[zero,mid,one],[one,mid,zero],[one,mid,one]]), res)
 #a,b=prob.get_coord_reconst(np.array([[zero,zero,mid],[zero,one,mid],[one,zero,mid],[one,one,mid]]), res)
-#%
+#%%
 b=b.reshape(res,res)
 plt.imshow(b)
-plt.title("Fine reconstruction Z plane")
 plt.colorbar()
+#%%<
 
+#plt.tricontourf(a[:,0],a[:,1],b)
 #%% - Im gonna interpolate in a finer grid, 1D reconstruction
 
 
@@ -177,7 +174,7 @@ for i in get_neighbourhood(n, 10,10,10, prob.mesh_1D.s_blocks[0]):
 
 #%%
 
-for i in get_uncommon(get_neighbourhood(n+1, 10,10,10, prob.mesh_1D.s_blocks[0]),get_neighbourhood(1, 10,10,10, prob.mesh_1D.s_blocks[0])):
+for i in get_uncommon(get_neighbourhood(n+1, 10,10,10, a.s_blocks[0]),get_neighbourhood(1, 10,10,10, a.s_blocks[0])):
     print()
     print(prob.B_matrix[i])
     cc+=np.sum(prob.B_matrix[i].toarray())
@@ -191,6 +188,17 @@ plt.imshow(a)
 plt.colorbar()
 
 
+
+#%%
+for i in get_neighbourhood(1, 10,10,10, a.s_blocks[0]):
+    print()
+# =============================================================================
+#     print(np.nonzero(A[i]))
+#     print(np.dot(A[i], sol))
+#     print(prob.B_matrix.dot(q)[i])
+#     print(np.dot(Up[i], sol))
+# =============================================================================
+    #print(A[i,np.nonzero(A[i])])
 
 
 #%% - Reconstruction
