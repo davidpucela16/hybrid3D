@@ -111,7 +111,6 @@ def assemble_Dirichlet_1D(sparse_arrs, U, D, h, cells):
     return sparse_arrs, (initial_value_Dirichlet, final_value_Dirichlet)
     
 def assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R):
-    pdb.set_trace()
     for i in vertex_to_edge:
         if len(i)==1: #Boundary condition
             #Mount the boundary conditions here
