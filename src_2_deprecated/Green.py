@@ -173,17 +173,7 @@ def unit_test_Simpson(h,D):
     b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,-h/2])))[1]*h**2/36
     b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,h/2])))[1]*h**2/36
     
-    from scipy.integrate import dblquad
-    def integrand(y, x):
-        
-        p_1=np.array([0,0,0])
-        p_2=np.array([x,y,h/2])
-        r = np.dot(grad_point((p_2, p_1)), np.array([0,0,1]))
-        return r / (4*np.pi*D)
-    
-    scp, _ = dblquad(integrand, -h/2,h/2 , -h/2,  h/2)
     #The following is the exact result of the Simpson's integration done by hand (notebook)
-    print("With scipy integration: ", scp)
     print("Manually with the grad point function", -b/4/np.pi/D)
     print("Analytical Simpson= ", -(27**-0.5+2**0.5+4)/(9*np.pi*D))
     #The following is the value returned by the function 
@@ -214,7 +204,6 @@ def another_unit_test_Simpson():
         print("This must be 1 due to properties of delta", integral)
     print("We expect around a 20% error")
         
-        
 
 def unit_test_single_layer(h, a):
     """h is the size of the square
@@ -241,6 +230,8 @@ def unit_test_single_layer(h, a):
     print("Simpson integral", mine)
     
     return t[1]-t[0], t[3]-t[2]
+    
+
 
 def get_self_influence(R,L, D):
     #####################################

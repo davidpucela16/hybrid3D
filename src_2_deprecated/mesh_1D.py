@@ -29,7 +29,6 @@ class mesh_1D():
         L=np.sum((pos_vertex[endVertex] - pos_vertex[startVertex])**2, axis=1)**0.5
         self.L=L
         h=L/np.around(L/h)
-        self.cells=L/h
         self.h=h
         self.tau=np.divide((pos_vertex[endVertex] - pos_vertex[startVertex]).T,L).T
         self.edges=np.arange(len(startVertex)) #Total number of edges in the network
@@ -131,8 +130,6 @@ class mesh_1D():
         the integral of the rapid term over the surface
         
         Main function used to calculate J
-        
-        h must be the disc size of the mesh_3D
         """
         
         sources=np.arange(len(self.s_blocks))[np.in1d(self.s_blocks, neighbourhood)]
@@ -141,27 +138,32 @@ class mesh_1D():
         for i in sources:
             ed=self.source_edge[i]
             a,b= self.pos_s[i]-self.tau[ed]*self.h[ed]/2, self.pos_s[i]+self.tau[ed]*self.h[ed]/2
+            ####This h must be the h of the mesh 3D
             q=Simpson_surface((a,b, self.R[ed], K[ed]),function, center,h, normal,D)
-
+            ########################
+            #Coefficients due to geometry are added after, outside of this function!
+            ########################
             q_array=np.append(q_array, q)
-        
-        #Return q_kernel_data, C_v_kernel_dat
         return q_array,  sources
 
 
-        
+
+#To test the kernel_integral_surface function I'm gonna place a few sources inside
+#a big cube and integrate the normal gradient through the cube's faces. That integral
+#can be easily calculated analytically as a function of the properties of the delta
+#function
 
 def test_kernel_integral():
     
     from Green import get_grad_source_potential, unit_test_Simpson
-    h_mesh=10 #size of the cube
+    h_mesh=100 #size of the cube
     
     #One source and one block
     startVertex=np.array([0])
     endVertex=np.array([1])
     vertex_to_edge=np.array([[0]])
     
-    L_vessel=1
+    L_vessel=10
     
     pos_vertex=np.array([[-L_vessel/2,0,0],[L_vessel/2,0,0]])
     diameters=np.array([0.1]) #on s'en fiche 
@@ -176,8 +178,5 @@ def test_kernel_integral():
     
     print("If h_mesh is sufficiently greater than L_vessel this should be around -0.198: ", np.sum(pp[0])*h_mesh**2/L_vessel)
     
-    unit_test_Simpson(h_mesh, D)  
+    unit_test_Simpson(h_mesh, D)
 
-
-
-      

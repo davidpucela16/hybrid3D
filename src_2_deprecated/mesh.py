@@ -177,7 +177,7 @@ class cart_mesh_3D():
         blocks=np.append(blocks, blocks+arr[1]*self.step_y)
         blocks=np.append(blocks, blocks+arr[0]*self.step_x)
         
-        return(np.sort(blocks))
+        return(np.sort(blocks).astype(int))
     
     def get_corners(self):
         self.corners=np.array([0,self.step_y-1, self.step_x-self.step_y, self.step_x-1])
