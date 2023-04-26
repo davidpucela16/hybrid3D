@@ -13,7 +13,8 @@ from scipy import integrate
 import pdb
 
 #%% - 
-theta=np.linspace(0,2*np.pi,1000) #Discretization of a circumference
+discretization=10000
+theta=np.linspace(0,2*np.pi*(1-1/discretization),discretization) #Discretization of a circumference
 R=3 #Radius 
 
 p1=np.array([0,R]) #Position of the center
@@ -41,17 +42,20 @@ np.log((np.cos(np.pi/8)+np.sin(np.pi/8))/(np.cos(np.pi/8)-np.sin(np.pi/8)))
 #This section is useful to prove the principal value integral with an easy 2D example
 c=0
 integral=0
-for i in p2.T[1:-1,:]: #We exclude the singularity 
+integrand=np.zeros(discretization)
+
+#for i in p2.T[1:,:]: #We exclude the singularity 
+for i in p2.T:
     x_c=i[0]
     y_c=i[1]
-    r=-np.array([x_c,y_c])+np.array([0,R])
-    r=-r
+    r=np.array([0,R+0.01])-np.array([x_c,y_c])
     d=np.linalg.norm(r)
     er=r/d
-    
     grad_G=1/d
     n=np.array([x_c, y_c])/R
+    integrand[c]=np.dot(er,n)*grad_G
     integral+=np.dot(er,n)*grad_G
+    print(integral)
     c+=1
 
 integral=integral*R/(len(theta-2))
@@ -128,7 +132,7 @@ class cyl_full_integral():
         L=self.L
         for i in range(self.Ns):
             inc_s=self.s[i]-L/2
-            F[i]=self.get_point_wise_approximation(inc_s, R)*self.h
+            F[i]=self.get_point_wise_approximation(inc_s)*self.h
         self.F=F
         
     #TO COMPUTE NON INTEGRATED ARRAYS
@@ -142,7 +146,7 @@ class cyl_full_integral():
         for i in range(self.Ns):
             inc_s=np.linalg.norm(self.s[i]-s_0)
             #pdb.set_trace()
-            ellip_wise[i]=self.get_point_wise_approximation(inc_s, self.R)
+            ellip_wise[i]=self.get_point_wise_approximation(inc_s)
             point_wise[i]=get_point_point(inc_s, self.R)
             init=np.array([self.s[i]-self.h/2,0])
             end=np.array([self.s[i]+self.h/2,0])
@@ -175,7 +179,7 @@ class cyl_full_integral():
             si=self.s[i]
             for j in range(self.Ns):
                 sj=self.s[j]
-                self.SL_2D[i]+=self.get_point_wise_approximation(np.abs(si-sj), R)*self.h
+                self.SL_2D[i]+=self.get_point_wise_approximation(np.abs(si-sj))*self.h
                 
     def integrate_1D(self):
         #Returns the analytically integrated value of the 1D approximation
@@ -231,11 +235,21 @@ def dip2(L,R):
     return(dip)
 
 #%% - Estimation of the self influence
-R=5
+R=2
 L=10
 
-a=cyl_full_integral(1000, L, R)
+a=cyl_full_integral(100, L, R)
+#%%
+a.not_integrated(5)
+plt.plot(a.ellip_point, label="Secomb")
+plt.plot(a.point_point, label="Fleischman")
+plt.plot(a.Gjerde, label="Gjerde")
+plt.legend()
+plt.show()
 
+
+
+#%%
 a.integrate_0D()
 a.integrate_1D()
 a.integrate_2D()
@@ -244,9 +258,13 @@ plt.plot(a.SL_2D, label="Secomb")
 plt.plot(a.SL_0D, label="Fleischman")
 plt.plot(a.SL_1D, label="Gjerde")
 plt.legend()
+plt.show()
 
 #%% - Comparison Simpson vs numerical
 
+    
+
+    
 numerical=np.sum(a.SL_1D)/len(a.SL_1D)
 init=np.array([0,0])
 end=np.array([0,L])
@@ -257,3 +275,77 @@ x_3=np.array([R,L])
 Simpson=(sing_term2(init, end, x_1, R)+4*sing_term2(init, end, x_2, R)+sing_term2(init, end, x_3, R))*2*np.pi*R/6
 
 print("error Simpson: ", (Simpson-numerical)/numerical)
+
+
+
+
+
+#%%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+theta=np.linspace(0, np.pi*2, 100)
+
+
+def get_ref_integral(inc_s,R):
+    G = lambda theta :(inc_s**2 + (2*R*np.sin(theta))**2)**-0.5 
+    return(integrate.quad(G,0,2*np.pi)[0]*R/(4*np.pi))
+
+
+c=0
+x=np.array([1,R,0])
+
+ref=np.array([])
+H=np.array([])
+
+for i in theta:
+     
+    to_ver=1-np.cos(i)
+    
+    x_star=np.array([2,R*np.cos(i), R*np.sin(i)])
+    L=np.linalg.norm((x-x_star))
+    print(np.dot((x-x_star), np.array([0,1,0])))
+    ref=np.append(ref, np.dot((x-x_star), np.array([0,1,0])))
+    
+    H=np.append(H, to_ver*R)
+
+plt.plot(H)
+plt.plot(ref, label='ref')
+plt.legend()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    

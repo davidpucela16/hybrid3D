@@ -167,7 +167,7 @@ class cart_mesh_3D():
         - h is the discretization size (float)
         """
         
-        arr=np.array([])
+        arr=np.array([], dtype=int)
         for i in x: #Loop through each of the axis 
             b=int(int(i//(self.h/2))%2)*2-1
             arr=np.append(arr, b)

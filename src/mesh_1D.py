@@ -29,6 +29,7 @@ class mesh_1D():
         L=np.sum((pos_vertex[endVertex] - pos_vertex[startVertex])**2, axis=1)**0.5
         self.L=L
         h=L/np.around(L/h)
+        self.cells=L/h
         self.h=h
         self.tau=np.divide((pos_vertex[endVertex] - pos_vertex[startVertex]).T,L).T
         self.edges=np.arange(len(startVertex)) #Total number of edges in the network
@@ -125,11 +126,13 @@ class mesh_1D():
         #Return q_kernel_data, C_v_kernel_data, the columns for both 
         return q_array, C_v_array, sources
     
-    def kernel_integral_surface(self, center,normal, neighbourhood,function, K,D):
+    def kernel_integral_surface(self, center,normal, neighbourhood,function, K,D,h):
         """Returns the kernel that multiplied (scalar, dot) by the array of fluxes (q) returns
         the integral of the rapid term over the surface
         
         Main function used to calculate J
+        
+        h must be the disc size of the mesh_3D
         """
         
         sources=np.arange(len(self.s_blocks))[np.in1d(self.s_blocks, neighbourhood)]
@@ -138,10 +141,8 @@ class mesh_1D():
         for i in sources:
             ed=self.source_edge[i]
             a,b= self.pos_s[i]-self.tau[ed]*self.h[ed]/2, self.pos_s[i]+self.tau[ed]*self.h[ed]/2
-            q=Simpson_surface((a,b, self.R[ed], K[ed]),function, center,self.h[ed], normal,D)
-            ########################
-            #Coefficients due to geometry are already added!
-            ########################
+            q=Simpson_surface((a,b, self.R[ed], K[ed]),function, center,h, normal,D)
+
             q_array=np.append(q_array, q)
         
         #Return q_kernel_data, C_v_kernel_dat
@@ -150,6 +151,33 @@ class mesh_1D():
 
         
 
+def test_kernel_integral():
     
+    from Green import get_grad_source_potential, unit_test_Simpson
+    h_mesh=10 #size of the cube
+    
+    #One source and one block
+    startVertex=np.array([0])
+    endVertex=np.array([1])
+    vertex_to_edge=np.array([[0]])
+    
+    L_vessel=1
+    
+    pos_vertex=np.array([[-L_vessel/2,0,0],[L_vessel/2,0,0]])
+    diameters=np.array([0.1]) #on s'en fiche 
+    h=np.array([L_vessel/10])
+    D=1 
+    
+    a=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,D)
+    
+    a.s_blocks=np.zeros(10)
+    
+    pp=a.kernel_integral_surface(np.array([0,0,h_mesh/2]), np.array([0,0,1]), np.zeros(10), get_grad_source_potential, np.array([1]),1,h_mesh)
+    
+    print("If h_mesh is sufficiently greater than L_vessel this should be around -0.198: ", np.sum(pp[0])*h_mesh**2/L_vessel)
+    
+    unit_test_Simpson(h_mesh, D)  
 
-        
+
+
+      

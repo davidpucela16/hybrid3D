@@ -23,8 +23,10 @@ from scipy.sparse import csc_matrix
 import multiprocessing
 from multiprocessing import Pool
 
+print("NoLoc")
+
 class hybrid_set_up():
-    def __init__(self, mesh_3D, mesh_1D,  BC_type, BC_value,n, D, K):
+    def __init__(self, mesh_3D, mesh_1D,  BC_type, BC_value, D, K):
         
         self.K=K
         
@@ -36,7 +38,6 @@ class hybrid_set_up():
         self.BC_type=BC_type
         self.BC_value=BC_value
         
-        self.n=n
         
         self.mesh_3D.get_ordered_connect_matrix()
         
@@ -48,7 +49,6 @@ class hybrid_set_up():
 
     
     def Assembly_problem(self):
-        
         
         A_matrix=self.Assembly_A()
         self.A_matrix=A_matrix
@@ -91,12 +91,14 @@ class hybrid_set_up():
         
         # =============================================================================
         #         NOTICE HERE, THIS IS WHERE WE MULTIPLY BY h so to make it dimensionally consistent relative to the FV integration
-        A_matrix=csc_matrix((a[2]*self.mesh_3D.h, (a[0], a[1])), shape=(size,size)) + csc_matrix((b[2]*self.mesh_3D.h, (b[0], b[1])), shape=(size, size))
+        A_matrix=csc_matrix((a[2]*self.mesh_3D.h, (a[0], a[1])), shape=(size,size)) + csc_matrix((b[2], (b[0], b[1])), shape=(size, size))
         #       We only multiply the non boundary part of the matrix by h because in the boundaries assembly we need to include the h due to the difference
         #       between the Neumann and Dirichlet boundary conditions. In short Assembly_diffusion_3D_interior returns data that needs to be multiplied by h 
         #       while Assembly_diffusion_3D_boundaries is already dimensionally consistent
+        # We do not multiply the b side i.e. the boundary part of the matrix by h cause it is multiplied inside the function already, 
+        # that is, the kernel already has the dimensional values!
         # =============================================================================
-        self.I_ind_array=b[3]*self.mesh_3D.h
+        self.I_ind_array=b[3]
         
         
         return A_matrix
@@ -123,16 +125,17 @@ class hybrid_set_up():
             for k in bound: #Make sure this is the correct boundary variable
                 
                 pos_k=mesh.get_coords(k)
-                normal=normals[0]
+                normal=normals[c]
                 pos_boundary=pos_k+normal*h/2
                 if self.BC_type[c]=="Dirichlet":
-                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  self.mesh_1D.uni_s_blocks, get_source_potential, self.K,self.D)
-                    
+                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  self.mesh_1D.uni_s_blocks, get_source_potential, self.K,self.D, mesh.h)
+                    kernel=csc_matrix((r_k[0]*2*h,(np.zeros(len(r_k[0])),r_k[1])), shape=(1,len(self.mesh_1D.s_blocks)))
                 if self.BC_type[c]=="Neumann":
-                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  self.mesh_1D.uni_s_blocks, get_grad_source_potential, self.K,self.D)
-                    
-            kernel=csc_matrix((r_k[0]*h**2,(np.zeros(len(r_k[0])),r_k[1])), shape=(1,len(self.mesh_1D.s_blocks)))
-            B[k,:]-=kernel
+                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  self.mesh_1D.uni_s_blocks, get_grad_source_potential, self.K,self.D, mesh.h)
+                    if np.any(r_k[0]>0): pdb.set_trace()
+                    kernel=csc_matrix((r_k[0]*h**2,(np.zeros(len(r_k[0])),r_k[1])), shape=(1,len(self.mesh_1D.s_blocks)))
+                B[k,:]-=kernel
+                #if np.any(kernel.toarray()<0): pdb.set_trace()
             c+=1
             
         return(B)
@@ -235,7 +238,6 @@ class hybrid_set_up():
             arr[:,2]+=tau[2]*(j+1/2)
             
             crds=np.vstack((crds, arr))
-        
         # Create a pool of worker processes
         pool = Pool(processes=num_processes)
         # Use map function to apply interpolate_helper to each coordinate in parallel
@@ -310,13 +312,14 @@ class hybrid_set_up():
             kernel_s=np.array([1])
             
         else: #no boundary node (standard interpolation)
+            #if np.all(x==np.array([60,26,26])): pdb.set_trace()
             blocks=self.mesh_3D.get_8_closest(x)
             kernel_s=trilinear_interpolation(x, np.ones(3)*self.mesh_3D.h)
         
         q_array, C_v_array, sources=self.mesh_1D.kernel_point(x, self.mesh_1D.uni_s_blocks, get_source_potential, self.K, self.D)
             
         #if np.all(x==np.array([1.5, 4.5, 2.5])): pdb.set_trace()
-        return kernel_s, blocks, q_array, sources, C_v_array, sources
+        return np.squeeze(kernel_s), blocks, q_array, sources, C_v_array, sources
     
     
   
@@ -343,9 +346,101 @@ class hybrid_set_up():
 def interpolate_helper(args):
     self, k = args
     a,b,c,d,e,f = self.interpolate(k)
+    #if b.dtype!='int64': pdb.set_trace()    
     return a.dot(self.s[b]) + c.dot(self.q[d])        
 
-
+class visualization_3D():
+    def __init__(self,lim, res, prob, num_proc, vmax):
+        
+        self.vmax=vmax
+        self.vmin=0
+        self.lim=lim
+        self.res=res
+        
+        a=(lim[1]-lim[0])*np.array([1,2,3])/4
+        LIM_1=[lim[0], lim[0], lim[1], lim[1]]
+        LIM_2=[lim[0], lim[1], lim[0], lim[1]]
+        
+        perp_x=np.zeros([3,4,3])
+        for i in range(3):
+            perp_x[i]=np.array([a[i]+np.zeros(4),LIM_1 , LIM_2]).T
+            
+        perp_y, perp_z=perp_x.copy(),perp_x.copy()
+        
+        perp_y[:,:,0]=perp_x[:,:,1]
+        perp_y[:,:,1]=perp_x[:,:,0]
+        
+        perp_z[:,:,0]=perp_x[:,:,2]
+        perp_z[:,:,2]=perp_x[:,:,0]
+        data=np.empty([9, res, res])
+        for i in range(3):
+            for j in range(3):
+                if i==0: cor=perp_x
+                if i==1: cor=perp_y
+                if i==2: cor=perp_z
+                
+                a,b=prob.get_coord_reconst_chat(cor[j], res, num_processes=num_proc)
+                
+                data[i*3+j]=b.reshape(res, res)
+                
+        self.data=data
+        
+        self.perp_x=perp_x
+        self.perp_y=perp_y
+        self.perp_z=perp_z
+        
+        self.plot(data, lim)
+        
+        return
+    
+    def plot(self, data, lim):
+        
+        res=self.res
+        perp_x, perp_y, perp_z=self.perp_x, self.perp_y, self.perp_z
+        
+        # Create a figure with 3 rows and 3 columns
+        fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(18,18))
+        
+        # Set the titles for each row of subplots
+        row_titles = ['X', 'Y', 'Z']
+        
+        # Set the titles for each individual subplot
+        subplot_titles = ['x={:.2f}'.format(perp_x[0,0,0]), 'x={:.2f}'.format(perp_x[1,0,0]), 'x={:.2f}'.format(perp_x[2,0,0]),
+                          'y={:.2f}'.format(perp_y[0,1,1]), 'y={:.2f}'.format(perp_y[1,1,1]), 'y={:.2f}'.format(perp_y[2,1,1]),
+                          'z={:.2f}'.format(perp_z[0,0,2]), 'z={:.2f}'.format(perp_z[1,0,2]), 'z={:.2f}'.format(perp_z[2,2,2])]
+        
+        
+        # Loop over each row of subplots
+        for i, ax_row in enumerate(axs):
+            # Set the title for this row of subplots
+            ax_row[0].set_title(row_titles[i], fontsize=16)
+            
+            # Loop over each subplot in this row
+            for j, ax in enumerate(ax_row):
+                # Plot some data in this subplot
+                x = [1, 2, 3]
+                y = [1, 4, 9]
+                                             
+                b=self.data[i*3+j]
+                
+                im=ax.imshow(b.reshape(res,res), origin='lower', vmax=self.vmax, vmin=self.vmin, extent=[lim[0], lim[1], lim[0], lim[1]])
+                # Set the title and y-axis label for this subplot
+                ax.set_title(subplot_titles[i*3 + j], fontsize=14)
+                if i==0: ax.set_ylabel('z'); ax.set_xlabel('y')
+                if i==1: ax.set_ylabel('z'); ax.set_xlabel('x')
+                if i==2: ax.set_ylabel('x'); ax.set_xlabel('y')
+                
+        # Set the x-axis label for the bottom row of subplots
+        #axs[-1, 0].set_xlabel('X-axis', fontsize=12)
+        
+        fig.subplots_adjust(right=0.8)
+        cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+        fig.colorbar(im, cax=cbar_ax)
+        
+        # Show the plot
+        plt.show()
+    
+    
 # =============================================================================
 # def get_coord_reconst_parallel(problem_object,corners, resolution):
 #     """Corners given in order (0,0),(0,1),(1,0),(1,1)

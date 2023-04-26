@@ -142,16 +142,16 @@ class hybrid_set_up():
                 k_neigh=get_neighbourhood(self.n, mesh.cells_x, mesh.cells_y, mesh.cells_z, k)
                 
                 pos_k=mesh.get_coords(k)
-                normal=normals[0]
+                normal=normals[c]
                 pos_boundary=pos_k+normal*h/2
                 if self.BC_type[c]=="Dirichlet":
-                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  k_neigh, get_source_potential, self.K,self.D)
+                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  k_neigh, get_source_potential, self.K,self.D, self.mesh_3D.h)
                     
                 if self.BC_type[c]=="Neumann":
-                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  k_neigh, get_grad_source_potential, self.K,self.D)
-                    
-            kernel=csc_matrix((r_k[0]*h**2,(np.zeros(len(r_k[0])),r_k[1])), shape=(1,len(self.mesh_1D.s_blocks)))
-            B[k,:]-=kernel
+                    r_k=self.mesh_1D.kernel_integral_surface(pos_boundary, normal,  k_neigh, get_grad_source_potential, self.K,self.D, self.mesh_3D.h)
+                
+                kernel=csc_matrix((r_k[0]*h**2,(np.zeros(len(r_k[0])),r_k[1])), shape=(1,len(self.mesh_1D.s_blocks)))
+                B[k,:]-=kernel
             c+=1
             
         return(B)
@@ -446,13 +446,13 @@ class hybrid_set_up():
         #if np.linalg.norm(normal) > 1: print('ERROR!!!!!!!!!!!!!!!!!')
         if np.linalg.norm(normal) > 1.0000001: pdb.set_trace()
         
-        r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2, normal,  get_uncommon(k_neigh, m_neigh), get_source_potential, self.K,self.D)
-        r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2, normal,  get_uncommon(m_neigh, k_neigh), get_source_potential, self.K,self.D)
+        r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2, normal,  get_uncommon(k_neigh, m_neigh), get_source_potential, self.K,self.D, self.mesh_3D.h)
+        r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2, normal,  get_uncommon(m_neigh, k_neigh), get_source_potential, self.K,self.D, self.mesh_3D.h)
         
         #if np.sum(r_m_k[0]) and np.sum(r_k_m[0]): pdb.set_trace()
         
-        grad_r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2, normal, get_uncommon(k_neigh, m_neigh), get_grad_source_potential, self.K,self.D)
-        grad_r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2, normal, get_uncommon(m_neigh, k_neigh),  get_grad_source_potential, self.K,self.D)
+        grad_r_k_m=net.kernel_integral_surface(pos_m/2+pos_k/2, normal, get_uncommon(k_neigh, m_neigh), get_grad_source_potential, self.K,self.D, self.mesh_3D.h)
+        grad_r_m_k=net.kernel_integral_surface(pos_m/2+pos_k/2, normal, get_uncommon(m_neigh, k_neigh),  get_grad_source_potential, self.K,self.D, self.mesh_3D.h)
         
         #NOTICE HOW THE VALUES ARE MULTIPLIED BY h**2 (SURFACE OF THE INTERFACE) DOWN HERE SINCE THE FUNCTION SAMPSON DOES NOT DO IT
         return(csc_matrix((r_k_m[0]*h**2,(np.zeros(len(r_k_m[0])),r_k_m[1])), shape=(1,len(net.s_blocks))),
@@ -637,7 +637,8 @@ class visualization_3D():
         
         self.vmax=vmax
         self.vmin=0
-        
+        self.lim=lim
+        self.res=res
         a=(lim[1]-lim[0])*np.array([1,2,3])/4
         LIM_1=[lim[0], lim[0], lim[1], lim[1]]
         LIM_2=[lim[0], lim[1], lim[0], lim[1]]
@@ -670,12 +671,13 @@ class visualization_3D():
         self.perp_y=perp_y
         self.perp_z=perp_z
         
-        self.plot(data, lim, res)
+        self.plot(data, lim)
         
         return
     
-    def plot(self, data, lim, res):
-                
+    def plot(self, data, lim):
+        
+        res=self.res
         perp_x, perp_y, perp_z=self.perp_x, self.perp_y, self.perp_z
         
         # Create a figure with 3 rows and 3 columns
@@ -685,9 +687,9 @@ class visualization_3D():
         row_titles = ['X', 'Y', 'Z']
         
         # Set the titles for each individual subplot
-        subplot_titles = ['x={:.2f}'.format(perp_x[0,0,0]), 'x={:.2f}'.format(perp_x[0,1,0]), 'x={:.2f}'.format(perp_x[0,2,0]),
-                          'y={:.2f}'.format(perp_y[0,0,1]), 'y={:.2f}'.format(perp_y[0,1,1]), 'y={:.2f}'.format(perp_x[0,2,1]),
-                          'z={:.2f}'.format(perp_z[0,0,2]), 'z={:.2f}'.format(perp_x[0,1,2]), 'z={:.2f}'.format(perp_x[0,2,2])]
+        subplot_titles = ['x={:.2f}'.format(perp_x[0,0,0]), 'x={:.2f}'.format(perp_x[1,0,0]), 'x={:.2f}'.format(perp_x[2,0,0]),
+                          'y={:.2f}'.format(perp_y[0,1,1]), 'y={:.2f}'.format(perp_y[1,1,1]), 'y={:.2f}'.format(perp_y[2,1,1]),
+                          'z={:.2f}'.format(perp_z[0,0,2]), 'z={:.2f}'.format(perp_z[1,0,2]), 'z={:.2f}'.format(perp_z[2,2,2])]
         
         
         # Loop over each row of subplots

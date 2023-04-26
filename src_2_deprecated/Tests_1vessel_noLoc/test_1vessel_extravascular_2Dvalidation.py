@@ -50,9 +50,10 @@ from mesh_1D import mesh_1D
 from Green import get_source_potential
 import pdb
 
-from hybrid_set_up_noboundary import hybrid_set_up, visualization_3D
+from hybrid_set_up_noLoc import hybrid_set_up, visualization_3D
 
 from neighbourhood import get_neighbourhood, get_uncommon
+#%
 
 
 
@@ -60,8 +61,7 @@ BC_type=np.array(["Neumann", "Neumann", "Neumann","Neumann","Neumann","Neumann"]
 BC_type=np.array(["Dirichlet", "Dirichlet","Neumann","Neumann", "Dirichlet","Dirichlet"])
 BC_value=np.array([0,0,0,0,0,0])
 
-cells=10
-n=2
+cells=5
 L=np.array([240,480,240])
 mesh=cart_mesh_3D(L,cells)
 
@@ -91,7 +91,7 @@ net.U=U
 net.D=D
 net.pos_arrays(mesh)
 
-prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K)
+prob=hybrid_set_up(mesh, net, BC_type, BC_value, 1, np.zeros(len(diameters))+K)
 
 mesh.get_ordered_connect_matrix()
 prob.Assembly_problem()
@@ -144,8 +144,7 @@ plt.plot(prob.q)
 
 #%%
 a=visualization_3D([0, L[0]], 50, prob, 12, 0.5)
-#%%
-plt.plot(a.data[5,25,:])
+
 #%%
 
 import matplotlib.pylab as pylab

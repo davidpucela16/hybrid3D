@@ -126,7 +126,7 @@ def Simpson_surface(arg, function, center, h, normal, D):
     #Other wise we would need another way to calculate this tangential vector
     #tau represents one of the prependicular vectors to normal 
     tau_1, tau_2=np.zeros(3), np.zeros(3)
-    tau_1[np.where(normal==0)[0][1]]=1
+    tau_1[np.where(normal==0)[0][0]]=1
     tau_2[np.where(normal==0)[0][1]]=1
     integral=0
     if function==get_source_potential:
@@ -138,27 +138,99 @@ def Simpson_surface(arg, function, center, h, normal, D):
             w_integral,_=function(tup_args, D)
             integral+=w_integral*w_i[i]
     elif function==get_grad_source_potential:
-        
         for i in range(len(w_i)):
             pos=center+corr[i,0]*tau_1+corr[i,1]*tau_2
             tup_args=a,b,pos,R,K
             #The function returns two kernels that cannot be multiplied 
             grad,_=function(tup_args, D)
             integral+=np.dot(grad,normal )*w_i[i]
+
+# =============================================================================
+#     elif function==get_grad_source_potential:
+#         #I've realized we can calculate this analytically more easily, so here is 
+#         #the attempt
+#         d=center-(a+b)/2 #array pointing to the center of the tile 
+#         integral=-np.dot(d, normal)/4/np.pi/np.linalg.norm(d)**3
+# =============================================================================
             
     return integral
 
 
 def unit_test_Simpson(h,D):
-    normal=np.array([0,1,0])
-    a=np.dot(Simpson_surface(np.array([0,0,0]), grad_point, np.array([0,h/2,0]),h, normal, D)[0],normal)*h**2
+    
+    arg=np.array([0,-0.2,0]),np.array([0,0.2,0]),0.1,D
+    a=Simpson_surface(arg, get_grad_source_potential, np.array([0,0,-h/2]),h, np.array([0,0,-1]), D)*h**2
+    
+    b=grad_point((np.array([0,0,0]), np.array([0,h/2,0])))[1]*h**2*16/36
+    
+    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
+    b+=grad_point((np.array([0,0,0]), np.array([0,h/2,-h/2])))[1]*h**2*4/36
+    b+=grad_point((np.array([0,0,0]), np.array([0,h/2,h/2])))[1]*h**2*4/36
+    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
+    
+    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,-h/2])))[1]*h**2/36
+    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,h/2])))[1]*h**2/36
+    b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,-h/2])))[1]*h**2/36
+    b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,h/2])))[1]*h**2/36
+    
     #The following is the exact result of the Simpson's integration done by hand (notebook)
+    print("Manually with the grad point function", -b/4/np.pi/D)
     print("Analytical Simpson= ", -(27**-0.5+2**0.5+4)/(9*np.pi*D))
     #The following is the value returned by the function 
-    print("Calculated Simpson= ", a)
+    print("Calculated Simpson= ", a/np.linalg.norm(arg[0]-arg[1])) #We have to divide by the length of the source since it is included in the integral
     #The following is the analytical value of the integral
     print("Analytical (Gauss)= ", -1/(6*D))
     return
+
+def another_unit_test_Simpson():
+    """integral over the faces of a cube to make sure the gradient of the greens function
+    over a closed surface is 0"""
+    normal=np.array([[0,0,1],
+                     [0,0,-1],
+                     [0,1,0],
+                     [0,-1,0],
+                     [1,0,0],
+                     [-1,0,0]])
+    integral=0
+    for h in np.array([1,2,3,9]): #size of the cube
+        #pdb.set_trace()    
+        arg=np.array([0,-0.2,0]),np.array([0,0.2,0]),0.1,1
+        L=0.4
+        integral=0
+        for i in range(6):
+            no=normal[i]
+            center=no*h/2
+            integral+=Simpson_surface(arg, get_grad_source_potential, center, h, no, 1)*h**2/L
+        print("This must be 1 due to properties of delta", integral)
+    print("We expect around a 20% error")
+        
+
+def unit_test_single_layer(h, a):
+    """h is the size of the square
+    a is the separation from the square of the point where the source is located"""
+    #Here we want to test the integration of the potential function
+    from scipy.integrate import dblquad
+    import time
+    
+    def integrand(y, x):
+        r = np.sqrt(x**2 + y**2 + a**2)
+        return 1 / (4*np.pi*r)
+    
+    t=np.zeros(4)
+    
+    t[0]=time.time()
+    integral, _ = dblquad(integrand, -h/2,h/2 , -h/2,  h/2)
+    t[1]=time.time()
+    arg=np.array([-0.1,0,0]),np.array([0.1,0,0]),1,1
+    t[2]=time.time()
+    mine=Simpson_surface(arg, get_source_potential, np.array([0,0,a]), h, np.array([0,0,1]), 1)*h**2/np.linalg.norm(arg[1]-arg[0])
+    t[3]=time.time()
+    
+    print("Scipy integral: ", integral)
+    print("Simpson integral", mine)
+    
+    return t[1]-t[0], t[3]-t[2]
+    
 
 
 def get_self_influence(R,L, D):
