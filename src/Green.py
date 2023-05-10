@@ -35,9 +35,8 @@ from small_functions import append_sparse
 #     
 #     return np.log(num/den)/(4*np.pi*D)
 # =============================================================================
-#from numba import njit
+from numba import njit
 
-#@njit
 def log_line(arg):
     """Returns the average value of the integral without the coefficient i.e. to the result one would have to multiply
     by the surface of the open cylinder (2 \pi R_j L_j)/(4*pi*D) to obtain a proper single layer potential
@@ -50,14 +49,14 @@ def log_line(arg):
     L=np.linalg.norm(b-a)
     tau=(b-a)/L
     
-    log=np.log((np.max([ra, rb]) + L/2 + np.abs(np.dot((a+b)/2-x,tau)))/(np.min([ra, rb]) - L/2 + np.abs(np.dot((a+b)/2-x,tau))))
+    log=np.log((np.max(np.array([ra, rb])) + L/2 + np.abs(np.dot((a+b)/2-x,tau)))/(np.min(np.array([ra, rb])) - L/2 + np.abs(np.dot((a+b)/2-x,tau))))
+
     
     return log
 
 def grad_point(arg):
     x,x_j=arg
     return -(x-x_j)/(np.linalg.norm(x-x_j)**3)
-
 
 def get_source_potential(tup_args,D):
     """Returns two arrays, one to multiply to q and another to multiply to Cv

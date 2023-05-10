@@ -13,8 +13,7 @@ from neighbourhood import get_neighbourhood, get_uncommon
 from small_functions import trilinear_interpolation, auto_trilinear_interpolation
 from Green import get_grad_source_potential, get_source_potential
 from small_functions import for_boundary_get_normal, append_sparse
-from assembly import assemble_transport_1D
-
+from scipy.sparse.linalg import spsolve as dir_solve
 from assembly import Assembly_diffusion_3D_boundaries, Assembly_diffusion_3D_interior
 
 import scipy as sp
@@ -23,15 +22,34 @@ from scipy.sparse import csc_matrix
 import multiprocessing
 from multiprocessing import Pool
 
+from assembly_1D import full_adv_diff_1D
+
+
+
+import matplotlib.pylab as pylab
+plt.style.use('default')
+params = {'legend.fontsize': 'x-large',
+          'figure.figsize': (15,15),
+         'axes.labelsize': 'x-large',
+         'axes.titlesize':'x-large',
+         'xtick.labelsize':'x-large',
+         'ytick.labelsize':'x-large', 
+         'font.size': 24,
+         'lines.linewidth': 2,
+         'lines.markersize': 15}
+pylab.rcParams.update(params)
+
 class hybrid_set_up():
-    def __init__(self, mesh_3D, mesh_1D,  BC_type, BC_value,n, D, K):
+    def __init__(self, mesh_3D, mesh_1D,  BC_type, BC_value,n, D, K, BCs_1D):
         
+        self.BCs_1D=BCs_1D
         self.K=K
         
         self.mesh_3D=mesh_3D
         self.h=mesh_3D.h
         
         self.mesh_1D=mesh_1D
+        self.R=mesh_1D.R
         self.D=D
         self.BC_type=BC_type
         self.BC_value=BC_value
@@ -45,11 +63,7 @@ class hybrid_set_up():
         
         return
     
-
-    
-    def Assembly_problem(self):
-        
-        
+    def Assembly_A_B_C(self):
         A_matrix=self.Assembly_A()
         self.A_matrix=A_matrix
         
@@ -58,31 +72,97 @@ class hybrid_set_up():
         self.B_matrix=B_matrix
         
         C_matrix=csc_matrix((self.mesh_3D.size_mesh, len(self.mesh_1D.pos_s)))
+        self.C_matrix=C_matrix
         
+        A_B_C=sp.sparse.hstack((A_matrix, B_matrix, C_matrix))
+        self.A_B_C_matrix=A_B_C
+        return(A_B_C)
+    
+
+    
+    def Assembly_D_E_F(self):
         
-        D_E_F_matrix=self.Assembly_D_E_F()
+        D=np.zeros([3,0])
+        E=np.zeros([3,0])
+        F=np.zeros([3,0])
+        
+        #The following are important matrices that are interesting to keep separated
+        #Afterwards they can be used to assemble the D, E, F matrices
+        G_ij=np.zeros([3,0])
+        H_ij=np.zeros([3,0])
+        Permeability=np.zeros([3,0])
+        
+        for j in range(len(self.mesh_1D.s_blocks)):
+            kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=self.interpolate(self.mesh_1D.pos_s[j])
+            D=append_sparse(D, kernel_s,np.zeros(len(col_s))+j, col_s)
+            E=append_sparse(E, kernel_q,np.zeros(len(col_q))+j, col_q)
+            
+            G_ij=append_sparse(G_ij, kernel_q,np.zeros(len(col_q))+j, col_q)
+            
+            if len(kernel_C_v)!=len(col_C_v): pdb.set_trace()
+            
+            F=append_sparse(F, kernel_C_v,np.zeros(len(col_C_v))+j, col_C_v)
+            H_ij=append_sparse(H_ij, kernel_C_v,np.zeros(len(col_C_v))+j, col_C_v)
+            
+            E=append_sparse(E, 1/self.K[self.mesh_1D.source_edge[j]] , j, j)
+            Permeability=append_sparse(Permeability, 1/self.K[self.mesh_1D.source_edge[j]] , j, j)
+        F=append_sparse(F, -np.ones(len(self.mesh_1D.s_blocks)) , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
+            
+        self.D_matrix=csc_matrix((D[0], (D[1], D[2])), shape=(len(self.mesh_1D.pos_s), self.mesh_3D.size_mesh))
+        self.E_matrix=csc_matrix((E[0], (E[1], E[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        self.F_matrix=csc_matrix((F[0], (F[1], F[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        
+        self.G_ij=csc_matrix((G_ij[0], (G_ij[1], G_ij[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        self.H_ij=csc_matrix((H_ij[0], (H_ij[1], H_ij[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        self.Permeability=csc_matrix((Permeability[0], (Permeability[1], Permeability[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        
+        return sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
+    
+    def Assembly_G_H_I(self):
         I_matrix=self.Assembly_I()
         
         #WILL CHANGE WHEN CONSIDERING MORE THAN 1 VESSEL
-        H_matrix=sp.sparse.identity(len(self.mesh_1D.pos_s))*self.mesh_1D.h[0]/(np.pi*self.mesh_1D.R[0]**2)
+        aux_arr=np.zeros(len(self.mesh_1D.pos_s))
+        #H matrix for multiple vessels
+        for ed in range(len(self.R)): #Loop through every vessel
+            DoFs=np.arange(np.sum(self.mesh_1D.cells[:ed]),np.sum(self.mesh_1D.cells[:ed])+np.sum(self.mesh_1D.cells[ed])) #DoFs belonging to this vessel
+            aux_arr[DoFs]=self.mesh_1D.h[ed]/(np.pi*self.mesh_1D.R[ed]**2)
+        H_matrix=sp.sparse.diags(aux_arr, 0)
         self.H_matrix=H_matrix
         
         #Matrix full of zeros:
         G_matrix=csc_matrix(( len(self.mesh_1D.pos_s),self.mesh_3D.size_mesh))
         self.G_matrix=G_matrix
-        
-        Full_linear_matrix=sp.sparse.hstack((A_matrix, B_matrix, C_matrix))
-        Full_linear_matrix=sp.sparse.vstack((Full_linear_matrix, D_E_F_matrix))
         self.G_H_I_matrix=sp.sparse.hstack((G_matrix, H_matrix, I_matrix))
         
-        Full_linear_matrix=sp.sparse.vstack((Full_linear_matrix, self.G_H_I_matrix))
+        return(self.G_H_I_matrix)
+    
+    def reAssembly_matrices(self):
+        Upper=sp.sparse.hstack((self.A_matrix, self.B_matrix, self.C_matrix))
+        Middle=sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
+        Down=sp.sparse.hstack((self.G_matrix, self.H_matrix, self.I_matrix))
         
+        Full_linear_matrix=sp.sparse.vstack((Upper,
+                                             Middle,
+                                             Down))
+        
+        return Full_linear_matrix
+    
+    def Assembly_problem(self):
+        Full_linear_matrix=sp.sparse.vstack((self.Assembly_A_B_C(),
+                                             self.Assembly_D_E_F(),
+                                             self.Assembly_G_H_I()))
         self.Full_linear_matrix=Full_linear_matrix
         
         self.Full_ind_array=np.concatenate((self.I_ind_array, np.zeros(len(self.mesh_1D.pos_s)), self.III_ind_array))
-        
         return
-    
+    def Solve_problem(self):
+        sol=dir_solve(self.Full_linear_matrix, -self.Full_ind_array)
+        self.s=sol[:self.mesh_3D.size_mesh]
+        self.q=sol[self.mesh_3D.size_mesh:-self.S]
+        self.Cv=sol[-self.S:]
+        return
+        
     def Assembly_A(self):
         """An h is missing somewhere to be consistent"""
         size=self.mesh_3D.size_mesh
@@ -157,33 +237,6 @@ class hybrid_set_up():
         return(B)
         
      
-        
-    def Assembly_D_E_F(self):
-        
-        D=np.zeros([3,0])
-        E=np.zeros([3,0])
-        F=np.zeros([3,0])
-        
-   
-        
-        for j in range(len(self.mesh_1D.s_blocks)):
-            kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=self.interpolate(self.mesh_1D.pos_s[j])
-            D=append_sparse(D, kernel_s,np.zeros(len(col_s))+j, col_s)
-            
-            E=append_sparse(E, kernel_q,np.zeros(len(col_q))+j, col_q)
-            
-            if len(kernel_C_v)!=len(col_C_v): pdb.set_trace()
-            
-            F=append_sparse(F, kernel_C_v,np.zeros(len(col_C_v))+j, col_C_v)
-            
-            E=append_sparse(E, 1/self.K[self.mesh_1D.source_edge[j]] , j, j)
-        F=append_sparse(F, -np.ones(len(self.mesh_1D.s_blocks)) , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
-            
-        self.D_matrix=csc_matrix((D[0], (D[1], D[2])), shape=(len(self.mesh_1D.pos_s), self.mesh_3D.size_mesh))
-        self.E_matrix=csc_matrix((E[0], (E[1], E[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-        self.F_matrix=csc_matrix((F[0], (F[1], F[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-        
-        return sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
     
     def Assembly_I(self):
         """Models intravascular transport. Advection-diffusion equation
@@ -193,14 +246,14 @@ class hybrid_set_up():
         D=self.mesh_1D.D
         U=self.mesh_1D.U
         L=self.mesh_1D.L
-        
-        
-        aa, bb =assemble_transport_1D(U, D, L[0]/len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s))
-        
+        aa, ind_array, DoF=full_adv_diff_1D(U, D, self.mesh_1D.h, self.mesh_1D.cells, self.mesh_1D.startVertex, self.mesh_1D.vertex_to_edge, self.R, self.BCs_1D)
+# =============================================================================
+#         aa, bb =assemble_transport_1D(U, D, L[0]/len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s))
+#         self.III_ind_array = np.zeros(len(self.mesh_1D.pos_s))
+#         self.III_ind_array [0] = bb[0]
+# =============================================================================
+        self.III_ind_array=ind_array
         I = csc_matrix((aa[0], (aa[1], aa[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-
-        self.III_ind_array = np.zeros(len(self.mesh_1D.pos_s))
-        self.III_ind_array [0] = bb[0]
         
         self.I_matrix=I
         
@@ -257,18 +310,23 @@ class hybrid_set_up():
             
             crds=np.vstack((crds, arr))
         
-        # Create a pool of worker processes
-        pool = Pool(processes=num_processes)
-        
-        # Use map function to apply interpolate_helper to each coordinate in parallel
-        results = pool.map(interpolate_helper, [(self, k) for k in crds])
-        
-        # Close the pool to free up resources
-        pool.close()
-        pool.join()
-        
-        # Convert the results to a numpy array
-        rec = np.array(results)
+# =============================================================================
+#         # Create a pool of worker processes
+#         pool = Pool(processes=num_processes)
+#         
+#         # Use map function to apply interpolate_helper to each coordinate in parallel
+#         results = pool.map(interpolate_helper, [(self, k) for k in crds])
+#         
+#         # Close the pool to free up resources
+#         pool.close()
+#         pool.join()
+#         
+#         # Convert the results to a numpy array
+#         rec = np.array(results)
+# =============================================================================
+        rec=np.array([])        
+        for k in crds:
+            rec=np.append(rec, interpolate_helper((self, k)))
         
         return crds, rec     
     
@@ -553,6 +611,7 @@ def get_I_1(x,nodes, dual_neigh, K, D, h_3D, mesh_1D_object):
             #for C_v and the col kernel i.e. the sources 
             a=mesh_1D_object.kernel_point(x, U, get_source_potential, K, D)
             ######## Changed sign on a[0] 26 mars 18:08
+            
             nodes[i].kernel_q=np.concatenate((nodes[i].kernel_q, -a[0]))
             nodes[i].kernel_C_v=np.concatenate((nodes[i].kernel_C_v, a[1]))
             
@@ -633,7 +692,7 @@ def interpolate_helper(args):
     return a.dot(self.s[b]) + c.dot(self.q[d])        
 
 class visualization_3D():
-    def __init__(self,lim, res, prob, num_proc, vmax):
+    def __init__(self,lim, res, prob, num_proc, vmax, *trans):
         
         self.vmax=vmax
         self.vmin=0
@@ -654,9 +713,17 @@ class visualization_3D():
         
         perp_z[:,:,0]=perp_x[:,:,2]
         perp_z[:,:,2]=perp_x[:,:,0]
+        
+        if trans:
+            perp_x+=trans
+            perp_y+=trans
+            perp_z+=trans
+            
+            
         data=np.empty([9, res, res])
         for i in range(3):
             for j in range(3):
+                #cor are the corners of a square 
                 if i==0: cor=perp_x
                 if i==1: cor=perp_y
                 if i==2: cor=perp_z
