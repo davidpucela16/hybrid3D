@@ -135,8 +135,10 @@ class cart_mesh_3D():
         self.get_corners()
         
         self.pos_cells=np.zeros((self.size_mesh, 3), dtype=np.float64)
+        self.assemble_boundary_vectors()
         
         return
+    
     def assemble_boundary_vectors(self):
         """Assembles all the necessary boundary arrays:
             - self.int

@@ -13,9 +13,8 @@ import pdb
 from numba import njit
 from small_functions import in1D
 from mesh import get_id
-
 class mesh_1D():
-    def __init__(self, startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,D, *flow_vars):
+    def __init__(self, startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters,h_approx, D, *flow_vars):
         """Generates the 1D mesh of cylinders with their centers stored within pos_s       
         
             - startVertex contains the ID of the starting vertex for each edge
@@ -29,10 +28,9 @@ class mesh_1D():
         self.D=D
         L=np.sum((pos_vertex[endVertex] - pos_vertex[startVertex])**2, axis=1)**0.5
         self.L=L
-        h=L/np.around(L/h)
-        self.cells=L/h
-        self.cells=self.cells.astype(int)
-        self.h=h
+        
+        h=self.calculate_h(h_approx)
+        
         self.tau=np.divide((pos_vertex[endVertex] - pos_vertex[startVertex]).T,L).T
         self.edges=np.arange(len(startVertex)) #Total number of edges in the network
         
@@ -60,15 +58,26 @@ class mesh_1D():
             self.U=fl.get_U()
         
         return
-    
-    
+    def calculate_h(self, h_approx):
+        h=np.zeros(len(self.L), dtype=np.float64)
+        for i in range(len(self.L)):
+            if np.around(self.L[i]/h_approx) > 3:
+                h[i]=self.L[i]/np.around(self.L[i]/h_approx)
+            else:
+                h[i]=self.L[i]/3
+        self.cells=self.L/h
+        self.cells=self.cells.astype(int)
+        self.h=h
+        return h
     def pos_arrays(self, mesh_3D):
         """This function is the pre processing step. It is meant to create the s_blocks
         and uni_s_blocks arrays which will be used extensively throughout. s_blocks represents
         the block where each source is located, uni_s_blocks contains all the source blocks
         in a given order that will be respected throughout the resolution
         
-            - h_cart is the size of the cartesian mesh"""
+            - h_cart is the size of the cartesian mesh
+            
+        THIS IS DEPRECATED, THE FASTER FUNCTION WITH @NJIT IS DEFINED BELOW"""
             
         # pos_s will dictate the ID of the sources by the order they are kept in it!
         s_blocks = np.array([]).astype(int)
@@ -89,11 +98,16 @@ class mesh_1D():
 #                 uni_s_blocks = np.append(uni_s_blocks, s_blocks[-1])
 # =============================================================================
         self.s_blocks=s_blocks
-        self.uni_s_blocks = np.unique(s_blocks)
+        self.uni_s_blocks, self.counts = np.unique(s_blocks, return_counts=True)
 
         total_sb = len(uni_s_blocks)  # total amount of source blocks
         self.total_sb = total_sb
-
+        
+    def pos_arrays_fast(self, mesh_3D):
+        self.s_blocks, self.uni_s_blocks,_=pos_arrays_optimized(self.source_edge, self.pos_s, self.tau, self.h, 
+                                                              mesh_3D.h, mesh_3D.cells_x, mesh_3D.cells_y, mesh_3D.cells_z)
+        return 
+    
     def kernel_point(self,x, neighbourhood, function, D):
         #Maybe we should put this function independently so it can be jitted
         """Returns the kernels to multiply the vectors of unknowns q and C_v
@@ -180,8 +194,30 @@ def kernel_point_optimized(x, neighbourhood, s_blocks, source_edge, tau_array, p
 #         #Return q_kernel_data, C_v_kernel_dat
 #         return q_array,  sources
 # =============================================================================
+@njit
+def pos_arrays_optimized(source_edge, pos_s, tau, h_1D, h_3D, cells_x, cells_y, cells_z, ):
+    """This function is the pre processing step. It is meant to create the s_blocks
+    and uni_s_blocks arrays which will be used extensively throughout. s_blocks represents
+    the block where each source is located, uni_s_blocks contains all the source blocks
+    in a given order that will be respected throughout the resolution
     
-    
+        - h_cart is the size of the cartesian mesh"""
+        
+    # pos_s will dictate the ID of the sources by the order they are kept in it!
+    s_blocks = np.zeros(0, dtype=np.int64)
+    uni_s_blocks = np.zeros(0, dtype=np.int64)
+    for i in range(len(pos_s)):
+        ed=source_edge[i] #Current edge (int) the source lies on 
+        x_j=pos_s[i] #Center of the cylinder
+        
+        s_blocks=np.append(s_blocks, get_id(h_3D,cells_x, cells_y, cells_z,x_j))
+
+    s_blocks=s_blocks
+    uni_s_blocks = np.unique(s_blocks)
+
+    total_sb = len(uni_s_blocks)  # total amount of source blocks
+    total_sb = total_sb
+    return s_blocks, uni_s_blocks, total_sb
     
 @njit
 def kernel_integral_surface_optimized(s_blocks, tau, h_net, pos_s, source_edge,center, normal, neighbourhood, function, D, h_3D):

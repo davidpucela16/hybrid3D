@@ -61,7 +61,6 @@ from neighbourhood import get_neighbourhood, get_uncommon
 
 
 L_vessel=240
-#%%
 # - This is the validation of the 1D transport eq without reaction
 alpha=50
 R_vessel=L_vessel/alpha
@@ -90,13 +89,12 @@ diameters=2*R_1D
 cells_per_vessel=100
 h=np.zeros(3)+L_vessel/cells_per_vessel
 
-net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,D_1D)
+net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h[0],D_1D)
 net.U=U
 net.D=D_1D
 
 
-#%% - Assembly of 3D data
-cells_3D=30
+cells_3D=10
 n=5
 L_3D=np.array([L_vessel, 2*L_vessel, L_vessel])
 mesh=cart_mesh_3D(L_3D,cells_3D)
@@ -105,7 +103,6 @@ mesh.assemble_boundary_vectors()
 
 net.pos_arrays(mesh)
 
-#%% - Set boundary conditions
 BCs_1D=np.array([[0,1],
                  [2,0],
                  [3,0]])
@@ -114,10 +111,11 @@ BC_type=np.array(["Neumann", "Neumann", "Neumann","Neumann","Neumann","Neumann"]
 BC_type=np.array(["Dirichlet", "Dirichlet","Neumann","Neumann", "Dirichlet","Dirichlet"])
 BC_value=np.array([0,0,0,0,0,0])
 
-#%% - Intra vascular problem
-prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-mesh.get_ordered_connect_matrix()
 
+prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
+
+prob.Interpolate_phi_bar()
+#%%
 prob.Assembly_I()
 
 
@@ -159,18 +157,31 @@ plt.legend()
 plt.show()
 
 #%%
-from hybrid_opt import Assembly_B_arrays_parallel
-from numba.typed import List
-prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-mesh.get_ordered_connect_matrix()
-Assembly_B_arrays_parallel(List(mesh.ordered_connect_matrix), mesh.size_mesh, n,1,
-                                mesh.cells_x, mesh.cells_y, mesh.cells_z, mesh.pos_cells, mesh.h, 
-                                net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge)
+
+#%%
+from assembly_1D import full_adv_diff_1D, assemble_transport_1D,assemble_vertices,assemble_transport_1D_2
+data, row, col=assemble_transport_1D(np.ndarray.flatten(U), 1, net.h, net.cells)
+data_2, row_2, col_2=assemble_transport_1D_2(np.ndarray.flatten(U), 1, net.h, net.cells)
+
+
+one=sp.sparse.csc_matrix((data, (row, col)), shape=(np.sum(net.cells), np.sum(net.cells)))
+two=sp.sparse.csc_matrix((data_2, (row_2, col_2)), shape=(np.sum(net.cells), np.sum(net.cells)))
+
+#%%
+# =============================================================================
+# from hybrid_opt import Assembly_B_arrays_parallel
+# from numba.typed import List
+# prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
+# mesh.get_ordered_connect_matrix()
+# Assembly_B_arrays_parallel(List(mesh.ordered_connect_matrix), mesh.size_mesh, n,1,
+#                                 mesh.cells_x, mesh.cells_y, mesh.cells_z, mesh.pos_cells, mesh.h, 
+#                                 net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge)
+# =============================================================================
 
 #%%
 #prob.Assembly_problem()
 
-print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
+#print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
 
 import pstats
 import cProfile
@@ -216,6 +227,7 @@ plt.plot(phi_bar, label="phi_bar")
 plt.legend()
 
 #%%
+pdb.set_trace()
 a=visualization_3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel/2,0]))
 
 

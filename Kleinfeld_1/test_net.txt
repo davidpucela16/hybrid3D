@@ -1,0 +1,46 @@
+define VERTEX 9539
+define EDGE 13894
+define POINT 649153
+
+Parameters {
+    ContentType "HxSpatialGraph"
+}
+
+VERTEX { float[3] VertexCoordinates } @1
+EDGE { int[2] EdgeConnectivity } @2
+EDGE { int NumEdgePoints } @3
+POINT { float[3] EdgePointCoordinates } @4
+POINT { float thickness } @5
+
+EDGE { float Hematocrit } @6
+EDGE { float fictional_edge } @7
+EDGE { float ArtVenCap_Label } @8
+EDGE { float thickness } @9
+EDGE { float length } @10
+EDGE { float Flowrate } @11
+EDGE { float concentration } @12
+VERTEX { float Pressure } @13
+
+@1 #coordinates of vertices
+1035.0 109.0 20.0
+939.0 166.0 33.0
+626.0 382.0 44.0
+602.0 495.0 45.0
+607.0 500.0 43.0
+826.0 525.0 51.0
+1041.0 271.0 25.0
+1047.0 278.0 68.0
+1039.0 236.0 71.0
+1032.0 274.0 169.0
+1034.0 309.0 110.0
+1030.0 286.0 87.0
+955.0 160.0 50.0
+693.0 101.0 57.0
+691.0 113.0 51.0
+713.0 203.0 25.0
+743.0 305.0 22.0
+711.0 419.0 96.0
+658.0 402.0 107.0
+643.0 370.0 119.0
+655.0 309.0 58.0
+646.0 307.0 44.0
