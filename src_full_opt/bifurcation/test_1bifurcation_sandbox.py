@@ -113,7 +113,7 @@ BC_value=np.array([0,0,0,0,0,0])
 
 
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-
+#%%
 prob.Interpolate_phi_bar()
 #%%
 prob.Assembly_I()

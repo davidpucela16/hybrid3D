@@ -80,11 +80,10 @@ class hybrid_set_up():
         sequentially append the new values of the kernels. However, this is a very inneficient method, it 
         is better to declare a size of the arrays, and then fill them up sequentially. For that task, it is 
         usefull to know the maximum amount of sources influencing a given FV mesh"""
-        
         s_blocks_unique=self.mesh_1D.uni_s_blocks #each FV cell that contains a source
         s_blocks_count=self.mesh_1D.counts #how many sources each block has
         
-        max_size=np.sum(np.sort(s_blocks_count)[:self.n**2]) #Adds up all the sources in the n**2 most populated blocks
+        max_size=np.sum(np.sort(s_blocks_count)[::-1][:self.n**3]) #Adds up all the sources in the n**2 most populated blocks
         #At no point will an array comming fror a kernel_point or kernel_surface contain more than max_size entries
         self.max_size=max_size
         return 
@@ -102,7 +101,6 @@ class hybrid_set_up():
         A_B_C=sp.sparse.hstack((A_matrix, B_matrix, C_matrix))
         self.A_B_C_matrix=A_B_C
         return(A_B_C)
-    
     
     def Assembly_D_E_F(self):
         
@@ -144,17 +142,30 @@ class hybrid_set_up():
     
     def Assembly_D_E_F_fast(self):
         
-        kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=self.Interpolate_phi_bar()
+        kernel_s,row_s, col_s,kernel_q, row_q, col_q,_,_,_=self.Interpolate_phi_bar()
         
+        self.D_matrix=csc_matrix((kernel_s, (row_s, col_s)), shape=(len(self.mesh_1D.s_blocks),self.mesh_3D.size_mesh))
         
+        q_portion_diagonal=np.repeat(1/self.K, self.mesh_1D.cells) #q_j/K_j
+        
+        self.Gij=csc_matrix((kernel_q, (row_q, col_q)), shape=(len(self.mesh_1D.s_blocks),len(self.mesh_1D.s_blocks)))  
+        self.q_portion=sp.sparse.diags(q_portion_diagonal)
+        
+        self.E_matrix=self.Gij+self.q_portion
+        
+        self.F_matrix=-sp.sparse.diags(np.ones(len(self.mesh_1D.s_blocks)))
+        
+        self.D_E_F_matrix=sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
+        
+        return self.D_E_F_matrix
         
         
     def Interpolate_phi_bar(self): 
         """Calculates the kernels to sequentially estimate the wall concentration"""
-        pdb.set_trace()
-        kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=Interpolate_phi_bar_fast_3(self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z, self.mesh_3D.h,
+        kernel_s,row_s, col_s,kernel_q, row_q, col_q,kernel_C_v,row_C_v, col_C_v=Interpolate_phi_bar_fast(self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z, self.mesh_3D.h,
                                                                                      self.mesh_3D.pos_cells,self.mesh_1D.s_blocks, self.mesh_1D.source_edge,self.mesh_1D.tau, self.mesh_1D.pos_s, self.mesh_1D.h, 
-                                                                                     self.R, self.D, self.max_size)
+                                                                                     self.R, self.D)
+        return kernel_s,row_s, col_s,kernel_q, row_q, col_q,kernel_C_v,row_C_v, col_C_v
                                                                                         
     
     def Assembly_G_H_I(self):
@@ -772,6 +783,10 @@ def Interpolate_phi_bar_fast(n, cells_x, cells_y, cells_z, h_3D,
     col_q_array=np.zeros(0, dtype=np.int64)
     col_C_array=np.zeros(0, dtype=np.int64)
     
+    row_s_array=np.zeros(0, dtype=np.int64)
+    row_q_array=np.zeros(0, dtype=np.int64)
+    row_C_array=np.zeros(0, dtype=np.int64)
+    
     for j in range(len(s_blocks)):
         kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=interpolate_optimized(pos_s[j], n, cells_x, cells_y,
                               cells_z, h_3D, get_bound_status(pos_s[j],h_3D, cells_x, cells_y, cells_z), pos_cells,s_blocks, source_edge,
@@ -779,14 +794,19 @@ def Interpolate_phi_bar_fast(n, cells_x, cells_y, cells_z, h_3D,
         
         kernel_s_array=np.concatenate((kernel_s_array, kernel_s))
         col_s_array=np.concatenate((col_s_array, col_s))
+        row_s_array=np.concatenate((row_s_array, np.zeros(len(col_s),dtype=np.int64)+j))
         
         kernel_q_array=np.concatenate((kernel_q_array, kernel_q))
         col_q_array=np.concatenate((col_q_array, col_q))
+        row_q_array=np.concatenate((row_q_array, np.zeros(len(col_q),dtype=np.int64)+j))
         
         kernel_C_array=np.concatenate((kernel_C_array, kernel_C_v))
         col_C_array=np.concatenate((col_C_array, col_C_v))
+        row_C_array=np.concatenate((row_C_array, np.zeros(len(col_C_v),dtype=np.int64)+j))
         
-    return(kernel_s_array, col_s_array, kernel_q_array, col_q_array, kernel_C_array, col_C_array)
+    return(kernel_s_array, row_s_array, col_s_array, 
+           kernel_q_array, row_q_array,col_q_array, 
+           kernel_C_array, row_C_array, col_C_array)
 @njit
 def Interpolate_phi_bar_fast_2(n, cells_x, cells_y, cells_z, h_3D, 
                              pos_cells,s_blocks, source_edge,tau_array, pos_s, h_1D, R, D):
@@ -816,14 +836,15 @@ def Interpolate_phi_bar_fast_2(n, cells_x, cells_y, cells_z, h_3D,
         
     return(kernel_s_array, col_s_array, kernel_q_array, col_q_array, kernel_C_array, col_C_array)
 
+@njit
 def Interpolate_phi_bar_fast_3(n, cells_x, cells_y, cells_z, h_3D, 
                              pos_cells,s_blocks, source_edge,tau_array, pos_s, h_1D, R, D, max_size):
     """Perform the loop in C that loops over the whole network"""
-    kernel_s_array=np.empty(len(s_blocks)*4, dtype=np.float64)
+    kernel_s_array=np.empty(len(s_blocks)*8, dtype=np.float64)
     kernel_q_array=np.empty(max_size*len(s_blocks), dtype=np.float64)
     kernel_C_array=np.empty(max_size*len(s_blocks), dtype=np.float64)
     
-    col_s_array=np.empty(len(s_blocks)*4, dtype=np.int64)
+    col_s_array=np.empty(len(s_blocks)*8, dtype=np.int64)
     col_q_array=np.empty(len(s_blocks)*max_size, dtype=np.int64)
     col_C_array=np.empty(len(s_blocks)*max_size, dtype=np.int64)
     
@@ -831,6 +852,7 @@ def Interpolate_phi_bar_fast_3(n, cells_x, cells_y, cells_z, h_3D,
     c_q=0 #counter for q 
     c_C=0 #counter for C
     
+    kk=0
     for j in range(len(s_blocks)):
         kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=interpolate_optimized(pos_s[j], n, cells_x, cells_y,
                               cells_z, h_3D, get_bound_status(pos_s[j],h_3D, cells_x, cells_y, cells_z), pos_cells,s_blocks, source_edge,
@@ -847,7 +869,7 @@ def Interpolate_phi_bar_fast_3(n, cells_x, cells_y, cells_z, h_3D,
         kernel_C_array[c_C:c_C+len(kernel_C_v)]=kernel_C_v
         col_C_array[c_C:c_C+len(kernel_C_v)]=col_C_v
         c_C+=len(kernel_C_v)
-    pdb.set_trace()
+        kk+=1
     #Now we eliminate the left over space
     kernel_s_array=kernel_s_array[:c_s]
     col_s_array=col_s_array[:c_s]
