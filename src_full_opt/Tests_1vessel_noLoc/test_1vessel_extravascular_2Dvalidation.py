@@ -35,7 +35,7 @@ pylab.rcParams.update(params)
 
 #%% - 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -46,12 +46,12 @@ import matplotlib.pyplot as plt
 import math
 
 from mesh_1D import mesh_1D
-from Green import get_source_potential
+from Green import GetSourcePotential
 import pdb
 
-from hybrid_set_up_noLoc import hybrid_set_up, visualization_3D
+from hybrid_set_up_noLoc import hybrid_set_up, Visualization3D
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 #%
 
 
@@ -64,7 +64,7 @@ cells=5
 L=np.array([240,480,240])
 mesh=cart_mesh_3D(L,cells)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 # - This is the validation of the 1D transport eq without reaction
 U = 0.1
@@ -88,12 +88,12 @@ h=np.array([L_vessel])/cells_1D
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.pos_arrays(mesh)
+net.PositionalArrays(mesh)
 
 prob=hybrid_set_up(mesh, net, BC_type, BC_value, 1, np.zeros(len(diameters))+K)
 
-mesh.get_ordered_connect_matrix()
-prob.Assembly_problem()
+mesh.GetOrderedConnectivityMatrix()
+prob.AssemblyProblem()
 
 print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
 
@@ -142,7 +142,7 @@ prob.q=sol[prob.F:]
 plt.plot(prob.q)
 
 #%%
-a=visualization_3D([0, L[0]], res, prob, 12, 0.5)
+a=Visualization3D([0, L[0]], res, prob, 12, 0.5)
 
 #%%
 

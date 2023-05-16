@@ -39,7 +39,7 @@ params = {'legend.fontsize': 'x-large',
 pylab.rcParams.update(params)
 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -48,14 +48,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import math
-from assembly_1D import full_adv_diff_1D
+from assembly_1D import FullAdvectionDiffusion1D
 from mesh_1D import mesh_1D
-from Green import get_source_potential
+from Green import GetSourcePotential
 import pdb
 
-from hybrid_opt import hybrid_set_up, visualization_3D
+from hybrid_opt import hybrid_set_up, Visualization3D
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 
 
 
@@ -68,7 +68,7 @@ n=20
 L_3D=np.array([L_vessel, 3*L_vessel, L_vessel])
 mesh=cart_mesh_3D(L_3D,cells_3D)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 
 #%%
@@ -99,15 +99,15 @@ h=np.zeros(3)+L_vessel/cells_per_vessel
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.pos_arrays(mesh)
+net.PositionalArrays(mesh)
 
 BCs_1D=np.array([[0,1],
                  [3,0]])
 
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-mesh.get_ordered_connect_matrix()
+mesh.GetOrderedConnectivityMatrix()
 
-prob.Assembly_I()
+prob.AssemblyI()
 
 
 tot_cell=cells_per_vessel*len(startVertex)
@@ -127,8 +127,8 @@ plt.show()
 Cv=np.ones(3*cells_per_vessel)
 #Cv=np.concatenate((np.ones(cells_per_vessel), np.arange(cells_per_vessel)[::-1]/cells_per_vessel, np.zeros(cells_per_vessel)))
 
-prob.Assembly_D_E_F()
-prob.Assembly_A_B_C()
+prob.AssemblyDEF()
+prob.AssemblyABC()
 Lin_matrix_1D=sp.sparse.vstack((sp.sparse.hstack((prob.A_matrix, prob.B_matrix)), 
                              sp.sparse.hstack((prob.D_matrix, prob.E_matrix))))
 
@@ -139,7 +139,7 @@ sol_1D=dir_solve(Lin_matrix_1D, b)
 prob.q=sol_1D[mesh.size_mesh:]
 q_Gj=sol_1D[mesh.size_mesh:]
 prob.s=sol_1D[:mesh.size_mesh]
-#a=visualization_3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel,0]))
+#a=Visualization3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel,0]))
 
 #%% - Now we are gonna solve the same problem but using the elliptic integrals for the single layer 
 P=Classic(3*L_vessel, R_vessel)
@@ -157,7 +157,7 @@ sol_2D=dir_solve(Lin_matrix_2D, b)
 prob.q=sol_2D[mesh.size_mesh:]
 prob.s=sol_2D[:mesh.size_mesh]
 q_exact=sol_2D[mesh.size_mesh:]
-#a=visualization_3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel,0]))
+#a=Visualization3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel,0]))
 
 #%% - This cell compares the two resulution
 textstr = 'h/R={}'.format(L_vessel/cells_per_vessel/R_vessel)
@@ -173,17 +173,17 @@ plt.show()
 
 #%% - Manual analytical self-influence
 from Potentials_module import Gjerde
-from Green import get_self_influence, log_line
+from Green import GetSelfInfluence, LogLine
 factor=1
 C=Classic(3*L_vessel/len(net.pos_s)*factor, R_vessel*factor)
 G_ii_matrix=C.get_single_layer_vessel(200)
 manual_self=np.sum(G_ii_matrix)/G_ii_matrix.size
 print(np.sum(G_ii_matrix)/G_ii_matrix.shape[0]/factor)
-print(get_self_influence(R_vessel*2,3*L_vessel/len(net.pos_s)*2, 1)*2*np.pi*R_vessel)
+print(GetSelfInfluence(R_vessel*2,3*L_vessel/len(net.pos_s)*2, 1)*2*np.pi*R_vessel)
 print((np.sum(q_exact)-np.sum(q_Gj))/np.sum(q_exact))
 a=np.array([0,0,0])
 b=np.array([0,3*L_vessel/len(net.pos_s), 0])
-#print(log_line((np.array([0,3*L_vessel/len(net.pos_s)*2,R_vessel]),a,b))/R_vessel/2)
+#print(LogLine((np.array([0,3*L_vessel/len(net.pos_s)*2,R_vessel]),a,b))/R_vessel/2)
 
 fig, ax = plt.subplots()
 
@@ -218,7 +218,7 @@ sol_2D_dipoles=dir_solve(Lin_matrix_2D, b)
 
 q_dip=sol_2D_dipoles[mesh.size_mesh:]
 s_dip=sol_2D_dipoles[:mesh.size_mesh]
-#a=visualization_3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel,0]))
+#a=Visualization3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel,0]))
 
 textstr = 'h/R={}'.format(L_vessel/cells_per_vessel/R_vessel)
 props = dict(boxstyle='round', facecolor='white', alpha=0.5)

@@ -37,7 +37,7 @@ params = {'legend.fontsize': 'x-large',
 pylab.rcParams.update(params)
 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -46,13 +46,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import math
-from assembly_1D import full_adv_diff_1D
+from assembly_1D import FullAdvectionDiffusion1D
 from mesh_1D import mesh_1D
 import pdb
 
-from hybrid_set_up_noboundary import hybrid_set_up, visualization_3D
+from hybrid_set_up_noboundary import hybrid_set_up, Visualization3D
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 
 
 BC_type=np.array(["Neumann", "Neumann", "Neumann","Neumann","Neumann","Neumann"])
@@ -64,7 +64,7 @@ n=2
 L_3D=np.array([L_vessel, 3*L_vessel, L_vessel])
 mesh=cart_mesh_3D(L_3D,cells_3D)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 
 # - This is the validation of the 1D transport eq without reaction
@@ -94,16 +94,16 @@ h=np.zeros(3)+L_vessel/cells_per_vessel
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.pos_arrays(mesh)
+net.PositionalArrays(mesh)
 
 BCs_1D=np.array([[0,1],
                  [3,0]])
 
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-mesh.get_ordered_connect_matrix()
+mesh.GetOrderedConnectivityMatrix()
 
 #%%
-prob.Assembly_problem()
+prob.AssemblyProblem()
 prob.Solve_problem()
 
 

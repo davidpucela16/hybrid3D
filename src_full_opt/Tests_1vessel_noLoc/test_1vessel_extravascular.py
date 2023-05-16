@@ -11,7 +11,7 @@ path_src=os.path.join(path, '../')
 os.chdir(path_src)
 
 import numpy as np
-from assembly import assemble_transport_1D
+from assembly import AssemblyTransport1D
 import matplotlib.pyplot as plt
 import scipy as sp
 import scipy.sparse.linalg
@@ -36,7 +36,7 @@ pylab.rcParams.update(params)
 
 #%% - 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -47,12 +47,12 @@ import matplotlib.pyplot as plt
 import math
 
 from mesh_1D import mesh_1D
-from Green import get_source_potential
+from Green import GetSourcePotential
 import pdb
 
-from hybrid_set_up_noLoc import hybrid_set_up, visualization_3D
+from hybrid_set_up_noLoc import hybrid_set_up, Visualization3D
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 #%
 
 
@@ -65,7 +65,7 @@ cells=10
 L=np.array([240,480,240])
 mesh=cart_mesh_3D(L,cells)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 # - This is the validation of the 1D transport eq without reaction
 U = 0.1
@@ -89,12 +89,12 @@ h=np.array([L_vessel])/cells_1D
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.pos_arrays(mesh)
+net.PositionalArrays(mesh)
 
 prob=hybrid_set_up(mesh, net, BC_type, BC_value, 1, np.zeros(len(diameters))+K)
 
-mesh.get_ordered_connect_matrix()
-prob.Assembly_problem()
+mesh.GetOrderedConnectivityMatrix()
+prob.AssemblyProblem()
 
 print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
 
@@ -118,7 +118,7 @@ phi_bar=np.zeros(len(net.pos_s))
 
 prob.C_v_array=np.random.random(len(net.pos_s))
 for i in range(len(net.pos_s)):
-    a,b,c,d,_,_=prob.interpolate(net.pos_s[i])
+    a,b,c,d,_,_=prob.Interpolate(net.pos_s[i])
     kernel_s=csc_matrix((a,(np.zeros(len(b)), b)), shape=(1, prob.F))
     kernel_q=csc_matrix((c,(np.zeros(len(d)), d)), shape=(1, prob.S))
     
@@ -133,7 +133,7 @@ plt.show()
     
 #%%
 
-a=visualization_3D([0, L[0]], 50, prob, 12, 1)
+a=Visualization3D([0, L[0]], 50, prob, 12, 1)
 
 #%%
 
@@ -152,7 +152,7 @@ plt.plot(prob.q)
 plt.show()
 
 #%%
-a=visualization_3D([0, L[0]], 50, prob, 12, 0.05)
+a=Visualization3D([0, L[0]], 50, prob, 12, 0.05)
 
 
 #%%
@@ -184,7 +184,7 @@ cor=np.array([[lim[0],mid,lim[0]],[lim[0],mid,lim[1]],[lim[1],mid,lim[0]],[lim[1
 
 import time
 start = time.time()
-a,b=prob.get_coord_reconst_chat(cor, res, num_processes=12)
+a,b=prob.GetCoordReconst_chat(cor, res, num_processes=12)
 end = time.time()
 print(end - start)
 
@@ -200,7 +200,7 @@ cor=np.array([[mid,lim[0],lim[0]],[mid,lim[0],lim[1]],[mid,lim[1],lim[0]],[mid,l
 
 import time
 start = time.time()
-a,b=prob.get_coord_reconst_chat(cor, res, num_processes=12)
+a,b=prob.GetCoordReconst_chat(cor, res, num_processes=12)
 end = time.time()
 print(end - start)
 
@@ -228,7 +228,7 @@ prob.q=sol[prob.F:]
 plt.plot(prob.q)
 
 #%%
-a=visualization_3D([0, L[0]], 50, prob, 12, 0.5)
+a=Visualization3D([0, L[0]], 50, prob, 12, 0.5)
 
 #%%
 

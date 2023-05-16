@@ -11,7 +11,7 @@ path_src=os.path.join(path, '../')
 os.chdir(path_src)
 
 import numpy as np
-from assembly import assemble_transport_1D
+from assembly import AssemblyTransport1D
 import matplotlib.pyplot as plt
 import scipy as sp
 import scipy.sparse.linalg
@@ -39,11 +39,11 @@ def get_three_slices(mesh_object, L):
     three equidistant slices perpendicular to three different axis. Therefore, 
     it returns 6 slices"""
     
-    a=mesh_object.get_x_slice(L[0]/4),mesh_object.get_x_slice(L[0]/2),mesh_object.get_x_slice(3*L[0]/4)
+    a=mesh_object.GetXSlice(L[0]/4),mesh_object.GetXSlice(L[0]/2),mesh_object.GetXSlice(3*L[0]/4)
     
-    b=mesh_object.get_y_slice(L[0]/4),mesh_object.get_y_slice(L[0]/2),mesh_object.get_y_slice(3*L[0]/4)
+    b=mesh_object.GetYSlice(L[0]/4),mesh_object.GetYSlice(L[0]/2),mesh_object.GetYSlice(3*L[0]/4)
     
-    c=mesh_object.get_z_slice(L[0]/4),mesh_object.get_z_slice(L[0]/2),mesh_object.get_z_slice(3*L[0]/4)
+    c=mesh_object.GetZSlice(L[0]/4),mesh_object.GetZSlice(L[0]/2),mesh_object.GetZSlice(3*L[0]/4)
     
     
     return a,b,c
@@ -65,7 +65,7 @@ analytical = (np.exp(Pe*s/L)-np.exp(Pe))/(1-np.exp(Pe))
 plt.plot(s, analytical)
 
 
-a, b = assemble_transport_1D(U, D, L/cells_1D, cells_1D)
+a, b = AssemblyTransport1D(U, D, L/cells_1D, cells_1D)
 
 A = sp.sparse.csc_matrix((a[0], (a[1], a[2])), shape=(cells_1D, cells_1D))
 
@@ -121,7 +121,7 @@ plt.show()
 
 #%% - 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -132,12 +132,12 @@ import matplotlib.pyplot as plt
 import math
 
 from mesh_1D import mesh_1D
-from Green import get_source_potential
+from Green import GetSourcePotential
 import pdb
 
 from hybrid_set_up_noboundary import hybrid_set_up
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 #%
 
 
@@ -151,7 +151,7 @@ n=10
 L=np.array([10,10,10])
 mesh=cart_mesh_3D(L,cells)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 #%%
 
@@ -165,11 +165,11 @@ h=np.array([L[0]])/cells_1D
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.pos_arrays(mesh)
+net.PositionalArrays(mesh)
 
 prob=hybrid_set_up(mesh, net, BC_type, BC_value, n, 1, np.zeros(len(diameters))+K)
-mesh.get_ordered_connect_matrix()
-prob.Assembly_problem()
+mesh.GetOrderedConnectivityMatrix()
+prob.AssemblyProblem()
 
 
 #%% - Validation of the H, I, F matrices:

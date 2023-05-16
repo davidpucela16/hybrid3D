@@ -37,7 +37,7 @@ print("import")
 from numba import njit
 
 @njit
-def log_line(arg):
+def LogLine(arg):
     """Returns the average value of the integral without the coefficient i.e. to the result one would have to multiply
     by the surface of the open cylinder (2 \pi R_j L_j)/(4*pi*D) to obtain a proper single layer potential
     
@@ -54,11 +54,11 @@ def log_line(arg):
     
     return log
 
-def grad_point(arg):
+def GradPoint(arg):
     x,x_j=arg
     return -(x-x_j)/(np.linalg.norm(x-x_j)**3)
 
-def get_source_potential(tup_args,D):
+def GetSourcePotential(tup_args,D):
     """Returns two arrays, one to multiply to q and another to multiply to Cv
     It includes both the single layer and double layer
         - center_source is self explanatory, center of the cylinder/segment
@@ -70,24 +70,24 @@ def get_source_potential(tup_args,D):
     a,b,x,R,K=tup_args
     L=np.linalg.norm(a-b)
     tau=(b-a)/L
-    Dj=np.dot((grad_point((x,b))-grad_point((x,a))),tau)*R**2/4
-    Sj=log_line((x, a,b))/(4*np.pi*D)
+    Dj=np.dot((GradPoint((x,b))-GradPoint((x,a))),tau)*R**2/4
+    Sj=LogLine((x, a,b))/(4*np.pi*D)
     
     
     #return(Sj-Dj/K, Dj)
     return(Sj, 0)
 
-def get_grad_source_potential( tup_args, D):
+def GetGradSourcePotential( tup_args, D):
     
     a,b,x,_,_=tup_args
     tau=(b-a)/np.linalg.norm(b-a)
     x_j=(a+b)/2
     #The second empty array that is returned is the corresponding to the C_v
-    return np.linalg.norm(b-a)*grad_point((x,x_j))/(4*np.pi*D), np.array([])
+    return np.linalg.norm(b-a)*GradPoint((x,x_j))/(4*np.pi*D), np.array([])
     #I have multiplied the grad point by the length of the segment, Im pretty sure it needs to be done to be consistent dimensionally 
 
 
-def Simpson_surface(arg, function, center, h, normal, D):
+def SimpsonSurface(arg, function, center, h, normal, D):
     """Assumes a square surface
     
     As always, the integral must be multiplied by the surface OUTSIDE of the
@@ -96,7 +96,7 @@ def Simpson_surface(arg, function, center, h, normal, D):
     source must be given as a tuple. If the function is:
         - Green_3D
         - grad_Green_3D
-        - get_grad_source_potential
+        - GetGradSourcePotential
         
     h and normal define the square surface where the function is integrated 
         - source is the position of the center of the source 
@@ -128,7 +128,7 @@ def Simpson_surface(arg, function, center, h, normal, D):
     tau_1[np.where(normal==0)[0][0]]=1
     tau_2[np.where(normal==0)[0][1]]=1
     integral=0
-    if function==get_source_potential:
+    if function==GetSourcePotential:
         
         for i in range(len(w_i)):
             pos=center+corr[i,0]*tau_1+corr[i,1]*tau_2
@@ -136,7 +136,7 @@ def Simpson_surface(arg, function, center, h, normal, D):
             #The function returns two kernels that cannot be multiplied 
             w_integral,_=function(tup_args, D)
             integral+=w_integral*w_i[i]
-    elif function==get_grad_source_potential:
+    elif function==GetGradSourcePotential:
         for i in range(len(w_i)):
             pos=center+corr[i,0]*tau_1+corr[i,1]*tau_2
             tup_args=a,b,pos,R,K
@@ -145,7 +145,7 @@ def Simpson_surface(arg, function, center, h, normal, D):
             integral+=np.dot(grad,normal )*w_i[i]
 
 # =============================================================================
-#     elif function==get_grad_source_potential:
+#     elif function==GetGradSourcePotential:
 #         #I've realized we can calculate this analytically more easily, so here is 
 #         #the attempt
 #         d=center-(a+b)/2 #array pointing to the center of the tile 
@@ -158,26 +158,26 @@ def Simpson_surface(arg, function, center, h, normal, D):
 def unit_test_Simpson(h,D):
     
     arg=np.array([0,-0.2,0]),np.array([0,0.2,0]),0.1,D
-    a=Simpson_surface(arg, get_grad_source_potential, np.array([0,0,-h/2]),h, np.array([0,0,-1]), D)*h**2
+    a=SimpsonSurface(arg, GetGradSourcePotential, np.array([0,0,-h/2]),h, np.array([0,0,-1]), D)*h**2
     
-    b=grad_point((np.array([0,0,0]), np.array([0,h/2,0])))[1]*h**2*16/36
+    b=GradPoint((np.array([0,0,0]), np.array([0,h/2,0])))[1]*h**2*16/36
     
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
-    b+=grad_point((np.array([0,0,0]), np.array([0,h/2,-h/2])))[1]*h**2*4/36
-    b+=grad_point((np.array([0,0,0]), np.array([0,h/2,h/2])))[1]*h**2*4/36
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([0,h/2,-h/2])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([0,h/2,h/2])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
     
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,-h/2])))[1]*h**2/36
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,h/2])))[1]*h**2/36
-    b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,-h/2])))[1]*h**2/36
-    b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,-h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([h/2,h/2,-h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([h/2,h/2,h/2])))[1]*h**2/36
     
     from scipy.integrate import dblquad
     def integrand(y, x):
         
         p_1=np.array([0,0,0])
         p_2=np.array([x,y,h/2])
-        r = np.dot(grad_point((p_2, p_1)), np.array([0,0,1]))
+        r = np.dot(GradPoint((p_2, p_1)), np.array([0,0,1]))
         return r / (4*np.pi*D)
     
     scp, _ = dblquad(integrand, -h/2,h/2 , -h/2,  h/2)
@@ -209,7 +209,7 @@ def another_unit_test_Simpson():
         for i in range(6):
             no=normal[i]
             center=no*h/2
-            integral+=Simpson_surface(arg, get_grad_source_potential, center, h, no, 1)*h**2/L
+            integral+=SimpsonSurface(arg, GetGradSourcePotential, center, h, no, 1)*h**2/L
         print("This must be 1 due to properties of delta", integral)
     print("We expect around a 20% error")
         
@@ -233,7 +233,7 @@ def unit_test_single_layer(h, a):
     t[1]=time.time()
     arg=np.array([-0.1,0,0]),np.array([0.1,0,0]),1,1
     t[2]=time.time()
-    mine=Simpson_surface(arg, get_source_potential, np.array([0,0,a]), h, np.array([0,0,1]), 1)*h**2/np.linalg.norm(arg[1]-arg[0])
+    mine=SimpsonSurface(arg, GetSourcePotential, np.array([0,0,a]), h, np.array([0,0,1]), 1)*h**2/np.linalg.norm(arg[1]-arg[0])
     t[3]=time.time()
     
     print("Scipy integral: ", integral)
@@ -241,7 +241,7 @@ def unit_test_single_layer(h, a):
     
     return t[1]-t[0], t[3]-t[2]
 
-def get_self_influence(R,L, D):
+def GetSelfInfluence(R,L, D):
     #####################################
     # REVIEW THE GEOMETRICAL COEFFICIENTS
     ####################################"
@@ -250,7 +250,7 @@ def get_self_influence(R,L, D):
     x1=np.array([0,R,0])
     x2=np.array([0,R,L/2])
     x3=np.array([0,R,L])
-    G1=log_line((x1,a,b))
-    G2=log_line((x2,a,b))
-    G3=log_line((x3,a,b))
+    G1=LogLine((x1,a,b))
+    G2=LogLine((x2,a,b))
+    G3=LogLine((x3,a,b))
     return (G1+4*G2+G3)/6/(4*np.pi*D)

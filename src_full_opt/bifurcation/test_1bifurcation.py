@@ -38,7 +38,7 @@ params = {'legend.fontsize': 'x-large',
 pylab.rcParams.update(params)
 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -47,18 +47,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import math
-from assembly_1D import full_adv_diff_1D
+from assembly_1D import FullAdvectionDiffusion1D
 from mesh_1D import mesh_1D
-from Green_optimized import get_source_potential
+from GreenFast import GetSourcePotential
 import pdb
 
-from hybrid_opt import hybrid_set_up, visualization_3D
+from hybrid_opt import hybrid_set_up, AssemblyBArraysFast
+from post_processing import Visualization3D
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 
-
-
-
+from numba.typed import List
 
 L_vessel=240
 #%%
@@ -87,23 +86,23 @@ pos_vertex=np.array([[L_vessel/2, 0, L_vessel/2],
 vertex_to_edge=[[0],[0,1,2], [1], [2]]
 diameters=2*R_1D
 
-cells_per_vessel=100
-h=np.zeros(3)+L_vessel/cells_per_vessel
+cells_per_vessel=8
+h_approx=L_vessel/cells_per_vessel
 
-net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,D_1D)
+net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h_approx,D_1D)
 net.U=U
 net.D=D_1D
 
 
 #%% - Assembly of 3D data
-cells_3D=30
-n=5
+cells_3D=5
+n=3
 L_3D=np.array([L_vessel, 2*L_vessel, L_vessel])
 mesh=cart_mesh_3D(L_3D,cells_3D)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
-net.pos_arrays(mesh)
+net.PositionalArraysFast(mesh)
 
 #%% - Set boundary conditions
 BCs_1D=np.array([[0,1],
@@ -116,9 +115,9 @@ BC_value=np.array([0,0,0,0,0,0])
 
 #%% - Intra vascular problem
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-mesh.get_ordered_connect_matrix()
+mesh.GetOrderedConnectivityMatrix()
 
-prob.Assembly_I()
+prob.AssemblyI()
 
 
 tot_cell=cells_per_vessel*len(startVertex)
@@ -150,40 +149,23 @@ plt.plot(dir_solve(prob.I_matrix, -prob.III_ind_array), label="numerical")
 plt.text(0, 0.6, text_1,  fontsize=40,
         verticalalignment='top', bbox=props)
 
-plt.text(10, 0.6, text_2,  fontsize=40,
+plt.text(cells_per_vessel, 0.6, text_2,  fontsize=40,
         verticalalignment='top', bbox=props)
 
-plt.text(20, 0.6, text_3,  fontsize=40,
+plt.text(2*cells_per_vessel, 0.6, text_3,  fontsize=40,
         verticalalignment='top', bbox=props)
 plt.legend()
 plt.show()
 
 #%%
-from hybrid_opt import Assembly_B_arrays_parallel
-from numba.typed import List
+
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-mesh.get_ordered_connect_matrix()
-Assembly_B_arrays_parallel(List(mesh.ordered_connect_matrix), mesh.size_mesh, n,1,
+AssemblyBArraysFast(List(mesh.ordered_connect_matrix), mesh.size_mesh, n,1,
                                 mesh.cells_x, mesh.cells_y, mesh.cells_z, mesh.pos_cells, mesh.h, 
                                 net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge)
+mat_path=path+ '/matrices'
 
-#%%
-#prob.Assembly_problem()
-
-print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
-
-import pstats
-import cProfile
-if __name__ == '__main__':
-    # run the profiler on the code and save results to a file
-    cProfile.run('prob.Assembly_problem()', filename=path + '/profile_results.prof')
-
-
-
-stats = pstats.Stats(path + '/profile_results.prof')
-
-stats.strip_dirs().sort_stats('cumulative').print_stats(30)
-
+prob.AssemblyProblem(mat_path)
 #%% - We solve the 2D problem in a 3D setting to be able to validate. Ideally, there is no transport in the y direction
 C_v_array=np.ones(len(net.pos_s)) #Though this neglects completely the contribution from the dipoles
 
@@ -216,7 +198,7 @@ plt.plot(phi_bar, label="phi_bar")
 plt.legend()
 
 #%%
-a=visualization_3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel/2,0]))
+a=Visualization3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel/2,0]))
 
 
 # =============================================================================
@@ -239,9 +221,9 @@ a=visualization_3D([0, L_vessel], 50, prob, 12, 0.5, np.array([0,L_vessel/2,0]))
 # =============================================================================
 #%%
 
-prob.Assembly_problem()
+prob.AssemblyProblem()
 prob.H_matrix/=4
-Lin_matrix=prob.reAssembly_matrices()
+Lin_matrix=prob.ReAssemblyMatrices()
 prob.Full_linear_matrix=Lin_matrix
 pdb.set_trace()
 prob.Solve_problem()
@@ -255,4 +237,4 @@ plt.plot(prob.q, label="q")
 plt.plot(phi_bar, label="phi_bar")
 plt.legend()
 
-a=visualization_3D([0, L_vessel], 50, prob, 12, 0.08, np.array([0,L_vessel/2,0]))
+a=Visualization3D([0, L_vessel], 50, prob, 12, 0.08, np.array([0,L_vessel/2,0]))

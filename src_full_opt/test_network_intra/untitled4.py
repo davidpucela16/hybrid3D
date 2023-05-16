@@ -23,7 +23,7 @@ path=os.path.dirname(__file__)
 path_src=os.path.join(path, '../')
 os.chdir(path_src)
 
-from assembly_1D import assemble_transport_1D, assemble_vertices
+from assembly_1D import AssemblyTransport1D, AssemblyVertices
 import matplotlib.pyplot as plt
 #%% - Validation single vessel with simplest bifurcation:
 D=1
@@ -43,8 +43,8 @@ h=L[0]/cells[0]+np.zeros(len(cells))
 
 init=np.array([0,1])
 
-sparse_arrs=assemble_transport_1D(U, D, h, cells)
-a, III_ind_array,kk=assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge,R, init, np.array([[0,1],[2,0]]))
+sparse_arrs=AssemblyTransport1D(U, D, h, cells)
+a, III_ind_array,kk=AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge,R, init, np.array([[0,1],[2,0]]))
 # =============================================================================
 # III_ind_array[0]*=1
 # III_ind_array[-1]*=0
@@ -94,8 +94,8 @@ BCs_1D=np.array([[0,1],
                  [2,0],
                  [3,0]])
 
-sparse_arrs=assemble_transport_1D(U, D, h, cells)
-a, III_ind_array,kk=assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge,R, init, BCs_1D)
+sparse_arrs=AssemblyTransport1D(U, D, h, cells)
+a, III_ind_array,kk=AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge,R, init, BCs_1D)
 
 I=csc_matrix((a[0], (a[1], a[2])), shape=(np.sum(cells), np.sum(cells)))
 
@@ -117,9 +117,9 @@ plt.legend()
 plt.show()
 
 #%% - Now with simplest bifurcation:
-from assembly_1D import full_adv_diff_1D
+from assembly_1D import FullAdvectionDiffusion1D
 
-a, III_ind_array,kk=full_adv_diff_1D(U, D, h, cells, init, vertex_to_edge, R, BCs_1D)
+a, III_ind_array,kk=FullAdvectionDiffusion1D(U, D, h, cells, init, vertex_to_edge, R, BCs_1D)
 
 I=csc_matrix((a[0], (a[1], a[2])), shape=(np.sum(cells), np.sum(cells)))
 

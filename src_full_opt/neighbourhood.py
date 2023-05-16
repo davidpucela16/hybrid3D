@@ -11,7 +11,7 @@ import pdb
 from numba import njit
 from small_functions import in1D
 # =============================================================================
-# def get_neighbourhood(n, cells_x, cells_y, cells_z, block_ID):
+# def GetNeighbourhood(n, cells_x, cells_y, cells_z, block_ID):
 #     """Will return the neighbourhood of a given block for a given n
 #     in a mesh made of square cells
 # 
@@ -46,16 +46,16 @@ from small_functions import in1D
 # =============================================================================
 
 
-def get_multiple_neigh(n, cells_x, cells_y, cells_z, array_of_blocks):
-    """This function will call the get_neighbourhood function for multiple blocks to
+def GetMultipleNeigh(n, cells_x, cells_y, cells_z, array_of_blocks):
+    """This function will call the GetNeighbourhood function for multiple blocks to
     return the ensemble of the neighbourhood for all the blocks"""
     full_neigh = set()
     for i in array_of_blocks:
-        full_neigh = full_neigh | set(get_neighbourhood(n, cells_x, i))
+        full_neigh = full_neigh | set(GetNeighbourhood(n, cells_x, i))
     return np.array(list(full_neigh), dtype=int)
 
 @njit
-def get_uncommon(k_neigh, n_neigh):
+def GetUncommon(k_neigh, n_neigh):
     """returns the cells of the first neighbourhood that has not in common with the
     second neighbourhood"""
 
@@ -64,7 +64,7 @@ def get_uncommon(k_neigh, n_neigh):
 
 
 @njit
-def get_neighbourhood(n, cells_x, cells_y, cells_z, block_ID):
+def GetNeighbourhood(n, cells_x, cells_y, cells_z, block_ID):
     """Will return the neighbourhood of a given block for a given n
     in a mesh made of square cells
 

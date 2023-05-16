@@ -71,7 +71,7 @@ plot_network(startVertex, endVertex, xVertex, yVertex, 'title')
 
 
 
-def pre_processing_network(U, init, end, pos_vertex):
+def PreProcessingNetwork(U, init, end, pos_vertex):
     vertex_to_edge=[]
     
     for i in range(len(pos_vertex)):

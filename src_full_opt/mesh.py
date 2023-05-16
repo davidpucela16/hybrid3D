@@ -17,13 +17,13 @@ from numba import njit
 
 #%%
 # =============================================================================
-# def get_corners(step_y, step_x, size_mesh):
+# def GetCorners(step_y, step_x, size_mesh):
 #     """Retrunst the IDs of the corners"""
 #     corners=np.array([0,step_y-1, step_x-step_y, step_x-1])
 #     corners=np.concatenate((corners, corners + size_mesh - step_x))
 #     return(corners)
 # 
-# def get_z_edges(corners):
+# def GetZEdges(corners):
 #     """Returns the IDs of the edges parallel to the z axis without the corners"""
 #     a=np.arange(corners[0], corners[1])
 #     b=np.arange(corners[4], corners[5])
@@ -32,7 +32,7 @@ from numba import njit
 #     z_edges=np.concatenate(([a[1:]],[b[1:]],[c[1:]],[d[1:]]), axis=0)
 #     return(z_edges)
 # 
-# def get_y_edges(corners, step_y):
+# def GetYEdges(corners, step_y):
 #     """Returns the IDs of the edges parallel to the y axis without the corners"""
 #     a=np.arange(corners[0], corners[2], step_y)
 #     b=np.arange(corners[1], corners[3], step_y)
@@ -41,7 +41,7 @@ from numba import njit
 #     y_edges=np.concatenate(([a[1:]],[b[1:]],[c[1:]],[d[1:]]), axis=0)
 #     return(y_edges)
 # 
-# def get_x_edges(corners, step_x):
+# def GetXEdges(corners, step_x):
 #     """Returns the IDs of the edges parallel to the x axis without the corners"""
 #     a=np.arange(corners[0], corners[4], step_x)
 #     b=np.arange(corners[2], corners[6], step_x)
@@ -50,7 +50,7 @@ from numba import njit
 #     x_edges=np.concatenate(([a[1:]],[b[1:]],[c[1:]],[d[1:]]), axis=0)
 #     return(x_edges)
 # 
-# def get_boundaries(corners, z_edges, y_edges, x_edges, cells_x,cells_y, cells_z):
+# def GetBoundaries(corners, z_edges, y_edges, x_edges, cells_x,cells_y, cells_z):
 #     z_e=z_edges
 #     y_e=y_edges
 #     x_e=x_edges
@@ -131,26 +131,26 @@ class cart_mesh_3D():
         self.step_y=cells_z
         self.step_x=cells_z*cells_y
         self.size_mesh=cells_x*cells_y*cells_z
-        #self.corners=get_corners(self.step_x, self.step_y, self.size_mesh)
-        self.get_corners()
+        #self.corners=GetCorners(self.step_x, self.step_y, self.size_mesh)
+        self.GetCorners()
         
         self.pos_cells=np.zeros((self.size_mesh, 3), dtype=np.float64)
-        self.assemble_boundary_vectors()
+        self.AssemblyBoundaryVectors()
         
         return
     
-    def assemble_boundary_vectors(self):
+    def AssemblyBoundaryVectors(self):
         """Assembles all the necessary boundary arrays:
             - self.int
             - self.full_boundary
             - self.connect_matrix
             - ..."""
-        self.get_boundaries()
-        self.assemble_list_boundary_stencils()
-        self.get_connect_matrix()
+        self.GetBoundaries()
+        self.AssemblyListBoundaryStencils()
+        self.GetConnectivityMatrix()
         return
         
-    def get_coords(self, k):
+    def GetCoords(self, k):
         """Returns the coordinate of the cell center of Id=k
         k must be an int"""
         
@@ -161,12 +161,12 @@ class cart_mesh_3D():
         return(np.array([self.x[c_x],self.y[c_y],self.z[c_z]]))
     
     
-    def get_corners(self):
+    def GetCorners(self):
         self.corners=np.array([0,self.step_y-1, self.step_x-self.step_y, self.step_x-1])
         self.corners=np.concatenate((self.corners, self.corners + self.size_mesh - self.step_x))
         return(self.corners)
     
-    def get_z_edges(self):
+    def GetZEdges(self):
         a=np.arange(self.corners[0], self.corners[1])
         b=np.arange(self.corners[4], self.corners[5])
         c=np.arange(self.corners[6], self.corners[7])
@@ -174,7 +174,7 @@ class cart_mesh_3D():
         self.z_edges=np.concatenate(([a[1:]],[b[1:]],[c[1:]],[d[1:]]), axis=0)
         return(self.z_edges)
     
-    def get_y_edges(self):
+    def GetYEdges(self):
         a=np.arange(self.corners[0], self.corners[2], self.step_y)
         b=np.arange(self.corners[1], self.corners[3], self.step_y)
         c=np.arange(self.corners[5], self.corners[7], self.step_y)
@@ -182,7 +182,7 @@ class cart_mesh_3D():
         self.y_edges=np.concatenate(([a[1:]],[b[1:]],[c[1:]],[d[1:]]), axis=0)
         return(self.y_edges)
     
-    def get_x_edges(self):
+    def GetXEdges(self):
         a=np.arange(self.corners[0], self.corners[4], self.step_x)
         b=np.arange(self.corners[2], self.corners[6], self.step_x)
         c=np.arange(self.corners[3], self.corners[7], self.step_x)
@@ -190,11 +190,11 @@ class cart_mesh_3D():
         self.x_edges=np.concatenate(([a[1:]],[b[1:]],[c[1:]],[d[1:]]), axis=0)
         return(self.x_edges)
     
-    def get_boundaries(self):
-        c=self.get_corners()
-        z_e=np.ndarray.flatten(self.get_z_edges())
-        y_e=np.ndarray.flatten(self.get_y_edges())
-        x_e=np.ndarray.flatten(self.get_x_edges())
+    def GetBoundaries(self):
+        c=self.GetCorners()
+        z_e=np.ndarray.flatten(self.GetZEdges())
+        y_e=np.ndarray.flatten(self.GetYEdges())
+        x_e=np.ndarray.flatten(self.GetXEdges())
         
         edges_plus_corners=np.concatenate((c, z_e, y_e, x_e))
         
@@ -243,7 +243,7 @@ class cart_mesh_3D():
         
         
     
-    def assemble_list_boundary_stencils(self):
+    def AssemblyListBoundaryStencils(self):
         """This function is meant to create a list with as many entries as boundary
         cells that provides the IDs of the neighbouring FVs, as well as the boundary 
         they belong to
@@ -284,7 +284,7 @@ class cart_mesh_3D():
         full_boundary=np.concatenate((full_boundary, self.corners))
         
         c=0
-        for i in self.get_z_edges(): 
+        for i in self.GetZEdges(): 
         #Loop through each of the edges parallel to the z axis 
         
             if c==0: #The boundaries are West and Down
@@ -306,7 +306,7 @@ class cart_mesh_3D():
             full_boundary=np.concatenate((full_boundary, i)) 
             c+=1
         c=0
-        for i in self.get_y_edges():
+        for i in self.GetYEdges():
             if c==0: #The boundaries are South and Down 
                 b1=1
                 b2=5
@@ -325,7 +325,7 @@ class cart_mesh_3D():
             c+=1
             
         c=0
-        for i in self.get_x_edges():
+        for i in self.GetXEdges():
             if c==0:
                 b1=1
                 b2=3
@@ -351,7 +351,7 @@ class cart_mesh_3D():
         self.full_boundary=full_boundary
         self.type_boundary=type_boundary
     
-    def get_diff_stencil(self, k):
+    def GetDiffStencil(self, k):
         """Returns the star stensil"""
 # =============================================================================
 #         This needs to be continued when I think of the better way to assemble
@@ -359,7 +359,7 @@ class cart_mesh_3D():
 # =============================================================================
         return(np.array([k,k+1, k-1, k+self.step_y, k-self.step_y, k+self.step_x, k-self.step_x]))
     
-    def get_connect_matrix(self):
+    def GetConnectivityMatrix(self):
         """ ????????????????????????????????????????????????????????????????????????????????
         I think both this and the previous function work well, but I have not debugged them yet
         ???????????????????????????????????????????????????????????????????????????????????
@@ -374,23 +374,23 @@ class cart_mesh_3D():
             connect_list=connect_list+[new_stencil.tolist()]
         self.connect_list=connect_list
         return 
-    def get_ordered_connect_matrix(self):
+    def GetOrderedConnectivityMatrix(self):
         ordered_connect_matrix=[]
         for k in range(self.size_mesh):
-            self.pos_cells[k]=self.get_coords(k)
+            self.pos_cells[k]=self.GetCoords(k)
             if k in self.full_boundary:
                 ordered_connect_matrix = ordered_connect_matrix + [self.connect_list[np.where(self.full_boundary==k)[0][0]]]
             else:
-                ordered_connect_matrix = ordered_connect_matrix + [self.get_diff_stencil(k).tolist()]
+                ordered_connect_matrix = ordered_connect_matrix + [self.GetDiffStencil(k).tolist()]
         self.ordered_connect_matrix = ordered_connect_matrix
         return ordered_connect_matrix
     
-    def get_x_slice(self, crds):
+    def GetXSlice(self, crds):
         """Returns an array with the IDs of the cells of an slice perpendicular 
         to the x axis closest to the coordinates given in crds
         
         crds is the coordinate along the relevant axis"""
-        k=get_id(self.h,self.cells_x, self.cells_y, self.cells_z,np.array([crds, 0,0])) #This is the lowest ID of the slice 
+        k=GetID(self.h,self.cells_x, self.cells_y, self.cells_z,np.array([crds, 0,0])) #This is the lowest ID of the slice 
         
         array=np.array([], dtype=int)
         c=0
@@ -399,12 +399,12 @@ class cart_mesh_3D():
             c+=1
         return array+k
     
-    def get_y_slice(self,crds):
+    def GetYSlice(self,crds):
         """Returns an array with the IDs of the cells of an slice perpendicular 
         to the y axis closest to the coordinates given in crds
         
                 crds is the coordinate along the relevant axis"""
-        k=get_id(self.h,self.cells_x, self.cells_y, self.cells_z,np.array([0,crds, 0])) #This is the lowest ID of the slice 
+        k=GetID(self.h,self.cells_x, self.cells_y, self.cells_z,np.array([0,crds, 0])) #This is the lowest ID of the slice 
         
         array=np.array([], dtype=int)
         c=0
@@ -413,9 +413,9 @@ class cart_mesh_3D():
             c+=1
         return array+k
     
-    def get_z_slice(self, crds):
+    def GetZSlice(self, crds):
         """ crds is the coordinate along the relevant axis"""
-        k=get_id(self.h,self.cells_x, self.cells_y, self.cells_z,np.array([0,0, crds])) #This is the lowest ID of the slice 
+        k=GetID(self.h,self.cells_x, self.cells_y, self.cells_z,np.array([0,0, crds])) #This is the lowest ID of the slice 
         
         array=np.arange(0, self.size_mesh, self.cells[-1]).astype(int)
         
@@ -434,7 +434,7 @@ class cart_mesh_3D():
         
     
 @njit
-def get_id(h,cells_x, cells_y, cells_z,crds):
+def GetID(h,cells_x, cells_y, cells_z,crds):
     """pos is an np.array with the values of the three coordinates
     The function returns the position along the mesh cells array"""
     pos_x=((crds[0])//(h/2))//2
@@ -444,7 +444,7 @@ def get_id(h,cells_x, cells_y, cells_z,crds):
     return(int(pos_x*cells_z*cells_y+pos_y*cells_z+pos_z))
 
 @njit
-def get_8_closest(h,cells_x, cells_y, cells_z,crds):
+def Get8Closest(h,cells_x, cells_y, cells_z,crds):
     """This function returns the (8) closest Cartesian grid centers
     - x is the position (array of length=3)
     - h is the discretization size (float)
@@ -455,7 +455,7 @@ def get_8_closest(h,cells_x, cells_y, cells_z,crds):
     for i in crds: #Loop through each of the axis 
         b=int(int(i//(h/2))%2)*2-1
         arr=np.append(arr, b)
-    ID=get_id(h,cells_x, cells_y, cells_z,crds) #ID of the containing block
+    ID=GetID(h,cells_x, cells_y, cells_z,crds) #ID of the containing block
     
     blocks=np.array([ID, ID+arr[2]], dtype=np.int64)
     blocks=np.append(blocks, blocks+arr[1]*step_y)

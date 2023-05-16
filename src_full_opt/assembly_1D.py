@@ -8,48 +8,100 @@ Created on Thu Apr 27 10:09:23 2023
 import numpy as np 
 import scipy as sp 
 import pdb
-from small_functions import append_sparse
+from small_functions import AppendSparse
 from scipy.sparse import csc_matrix
 from numba import njit
 
 from scipy.sparse.linalg import spsolve as dir_solve
 
 
-# =============================================================================
-# def pre_processing_network(U, init, end, pos_vertex):
-#     """This function must be called before the assembly of the 1D matrices because
-#     they need all velocities to be positive for the proper assembly of the bifurcation
-#     model"""
-#     vertex_to_edge=[]
-#     for i in range(len(pos_vertex)):
-#         if U[i]<0:
-#             temp=init[i]
-#             init[i]=end[i]
-#             end[i]=init[i]
-#             
-#         a=np.arange(init)[init==i] #edges for which this vertex is the initial 
-#         b=np.arange(end)[init==i]  #edges for which this vertex is the end
-#         
-#         vertex_to_edge+=[[a.tolist()+(-b).tolist()]]
-#         
-#     return init, end, pos_vertex
-# =============================================================================
+def Assemble_vertex_to_edge(vertices, edges):
+    """I will use np where because I don't know how to optimize it other wise"""
+    vertex_to_edge=[]
+    for i in range(len(vertices)):
+        a=np.where(edges[:,0]==i)[0]
+        b=np.where(edges[:,1]==i)[0]
+        temp=list(np.concatenate((a,b)))
+        vertex_to_edge.append(temp)
+    return vertex_to_edge
+
+@njit
+def pre_processing_network(init, end, flow_rate):
+    """Pre processes the edges so blood flows always from init to end"""
+    for i in np.where(flow_rate<0)[0]:
+        temp=init[i]
+        init[i]=end[i]
+        end[i]=temp
+    return init, end
+
+def set_artificial_BCs(vertex_to_edge, entry_concentration, exit_concentration, init, end):
+    """Assembles the BCs_1D array with concentration=entry_concentration for the init vertices and 
+    concentration=exit_concentration for exiting vertices
+    
+    Remember to have preprocessed the init and end arrays for the velocity to always be positive"""
+    BCs_1D=np.zeros(2, dtype=np.int64)
+    c=0
+    for i in vertex_to_edge: #Loop over all the vertices
+    #i contains the edges the vertex c is in contact with
+        if len(i)==1:
+            vertex=i[0]
+            if np.in1d(i, init):
+                BCs_1D=np.vstack((BCs_1D, np.array([c, entry_concentration])))
+            else:
+                BCs_1D=np.vstack((BCs_1D, np.array([c, exit_concentration])))
+        c+=1
+    return(BCs_1D)
+
+def check_local_conservativeness_flow_rate(init, end, vertex_to_edge, flow_rate):
+    """Checks if mass is conserved at the bifurcations"""
+    vertex=0
+    for i in vertex_to_edge:
+        
+        if len(i)>2:
+            a=np.zeros(len(i)) #to store whether the edges are entering or exiting
+            c=0
+            for j in i: #Goes through each edge of the bifurcation
+                a[c]=1 if vertex==init[j] else -1  #Vessel exiting
+                c+=1
+                
+            print(np.dot(flow_rate[i], a))
+        vertex+=1
+    return
+        
+
+def check_local_conservativeness_velocity(init, end, vertex_to_edge, flow_rate, R):
+    """Checks if mass is conserved at the bifurcations"""
+    vertex=0
+    for i in vertex_to_edge:
+        
+        if len(i)>2:
+            a=np.zeros(len(i)) #to store whether the edges are entering or exiting
+            c=0
+            for j in i: #Goes through each edge of the bifurcation
+                a[c]=1 if vertex==init[j] else -1  #Vessel exiting
+                c+=1
+                
+            print(np.dot(flow_rate[i], a))
+        vertex+=1
+    return
+
     
 
 
-def full_adv_diff_1D(U, D, h, cells, init, vertex_to_edge, R, BCs):
-    sparse_arrs=assemble_transport_1D_fast(U, D, h, cells)
-    sparse_arrs, ind_array, DoF_list=assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs)
+def FullAdvectionDiffusion1D(U, D, h, cells, init, vertex_to_edge, R, BCs):
+    sparse_arrs=AssemblyTransport1DFast(U, D, h, cells)
+    sparse_arrs, ind_array, DoF_list=AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs)
     
     return sparse_arrs, ind_array, DoF_list
 
 @njit
-def assemble_transport_1D(U, D, h, cells):
+def AssemblyTransport1D(U, D, h, cells):
     """Assembles the linear matrix for convection-dispersion for a network only for the inner DoFs"""
     data=np.zeros(0, dtype=np.float64) 
     row=np.zeros(0, dtype=np.int64)
     col=np.zeros(0, dtype=np.int64)
     for ed in range(len(cells)):
+        print("Assembling inner cells intra transport, edge: ", ed)
         initial=np.sum(cells[:ed])
         for i in initial+np.arange(cells[ed]-2)+1:
             data=np.concatenate((data, np.array([-U[ed]-D/h[ed],U[ed]+ 2*D/h[ed], -D/h[ed]], dtype=np.float64)))
@@ -58,7 +110,7 @@ def assemble_transport_1D(U, D, h, cells):
 
     return data, row, col       
 @njit
-def assemble_transport_1D_fast(U, D, h, cells):
+def AssemblyTransport1DFast(U, D, h, cells):
     """Assembles the linear matrix for convection-dispersion for a network only for the inner DoFs"""
     data=np.zeros(np.sum(cells)*3, dtype=np.float64) #times 3 because the stensil has three entries
     row=np.zeros(np.sum(cells)*3, dtype=np.int64)    #They are over - dimensioned
@@ -74,7 +126,7 @@ def assemble_transport_1D_fast(U, D, h, cells):
     return data, row, col   
 
        
-def assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs):
+def AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs):
     """This function assembles the 1D transport equation for the bifurcations"""
     #BCs is a two dimensional array where the first entry is the vertex and the second the value of the Dirichlet BC
     
@@ -87,7 +139,7 @@ def assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs)
             #Mount the boundary conditions here
             ed=i[0]
         # =============================================================================
-        #     sparse_arrs=append_sparse(sparse_arrs, np.array([-U/2-D/h,-U/2+3*D/h]), np.array([cells-1,cells-1]), np.array([cells-2,cells-1]))
+        #     sparse_arrs=AppendSparse(sparse_arrs, np.array([-U/2-D/h,-U/2+3*D/h]), np.array([cells-1,cells-1]), np.array([cells-2,cells-1]))
         #     final_value_Dirichlet=U-2*D/h
         # =============================================================================
             if init[i]!=vertex: #Then it must be the end Vertex of the edge 
@@ -97,7 +149,7 @@ def assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs)
                 current_DoF=np.sum(cells[:ed]) #initial vertex
                 kk=1
             
-            sparse_arrs=append_sparse(sparse_arrs, np.array([-U[ed]-D/h[ed],U[ed]+3*D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF+kk,current_DoF]))
+            sparse_arrs=AppendSparse(sparse_arrs, np.array([-U[ed]-D/h[ed],U[ed]+3*D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF+kk,current_DoF]))
             value_Dirichlet=-2*D/h[ed]
             ind_array[current_DoF]=BCs[np.where(BCs[:,0]==vertex)[0][0],1]*value_Dirichlet #assigns the value of the BC multiplied by the factor 
             
@@ -139,13 +191,13 @@ def assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs)
                 current_DoF=DoF[local_ed]
                 DoF_w=np.delete(DoF, local_ed) #The other two DoFs
                 #Exiting flux to the normal neighbouring cylinder 
-                sparse_arrs =append_sparse(sparse_arrs, np.array([D/h[ed]+U[ed], -D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF,current_DoF+1])) 
+                sparse_arrs =AppendSparse(sparse_arrs, np.array([D/h[ed]+U[ed], -D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF,current_DoF+1])) 
                 #Bifurcation Flux
-                sparse_arrs =append_sparse(sparse_arrs, np.array([2*D/h[ed]*(1-current_gamma)-U[ed]*current_gamma]), np.array([current_DoF]), np.array([current_DoF]))
+                sparse_arrs =AppendSparse(sparse_arrs, np.array([2*D/h[ed]*(1-current_gamma)-U[ed]*current_gamma]), np.array([current_DoF]), np.array([current_DoF]))
                 
                 for j in DoF_w:
                     vessel=np.where(DoF==j)[0][0] #same as local ed before but I wanted to give a different name. It is the local position of the vessel within the bifurcation (i)
-                    sparse_arrs =append_sparse(sparse_arrs, np.array([-2*D/h[ed]*gamma[vessel]-U[ed]*gamma[vessel]]), np.array([current_DoF]), np.array([j]))
+                    sparse_arrs =AppendSparse(sparse_arrs, np.array([-2*D/h[ed]*gamma[vessel]-U[ed]*gamma[vessel]]), np.array([current_DoF]), np.array([j]))
                 
             for ed in entering:
                 local_ed=np.where(i==ed)[0][0]
@@ -153,15 +205,15 @@ def assemble_vertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs)
                 current_gamma=gamma[local_ed]
                 current_DoF=DoF[local_ed]
                 #Normal Cylinder
-                sparse_arrs =append_sparse(sparse_arrs, np.array([-U[ed]-D/h[ed],D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF-1,current_DoF]))
+                sparse_arrs =AppendSparse(sparse_arrs, np.array([-U[ed]-D/h[ed],D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF-1,current_DoF]))
                 DoF_w=np.delete(DoF, local_ed) #The other two DoFs
                 
                 #Bifurcation Flux
-                sparse_arrs =append_sparse(sparse_arrs, np.array([2*D/h[ed]*(1-current_gamma)+U[ed]]), np.array([current_DoF]), np.array([current_DoF]))
+                sparse_arrs =AppendSparse(sparse_arrs, np.array([2*D/h[ed]*(1-current_gamma)+U[ed]]), np.array([current_DoF]), np.array([current_DoF]))
                 
                 for j in DoF_w:
                     vessel=np.where(DoF==j)[0][0]
-                    sparse_arrs =append_sparse(sparse_arrs, np.array([-2*D/h[ed]*gamma[vessel]]), np.array([current_DoF]), np.array([j]))
+                    sparse_arrs =AppendSparse(sparse_arrs, np.array([-2*D/h[ed]*gamma[vessel]]), np.array([current_DoF]), np.array([j]))
             
         vertex+=1
         

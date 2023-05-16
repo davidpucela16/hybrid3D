@@ -5,14 +5,16 @@ Created on Mon Feb 13 17:56:05 2023
 
 @author: pdavid
 """
-from Green_optimized import grad_point, log_line, Simpson_surface, get_source_potential,get_self_influence
-from neighbourhood import get_neighbourhood, get_multiple_neigh
+from GreenFast import GradPoint, LogLine, SimpsonSurface, GetSourcePotential,GetSelfInfluence
+from neighbourhood import GetNeighbourhood, GetMultipleNeigh
 from assembly_1D import flow
 import numpy as np
 import pdb
 from numba import njit
 from small_functions import in1D
-from mesh import get_id
+from mesh import GetID
+from numba.typed import List
+
 class mesh_1D():
     def __init__(self, startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters,h_approx, D, *flow_vars):
         """Generates the 1D mesh of cylinders with their centers stored within pos_s       
@@ -29,7 +31,7 @@ class mesh_1D():
         L=np.sum((pos_vertex[endVertex] - pos_vertex[startVertex])**2, axis=1)**0.5
         self.L=L
         
-        h=self.calculate_h(h_approx)
+        h=self.CalculateDiscretizatinSize(h_approx)
         
         self.tau=np.divide((pos_vertex[endVertex] - pos_vertex[startVertex]).T,L).T
         self.edges=np.arange(len(startVertex)) #Total number of edges in the network
@@ -58,7 +60,13 @@ class mesh_1D():
             self.U=fl.get_U()
         
         return
-    def calculate_h(self, h_approx):
+    def CalculateDiscretizatinSize(self, h_approx):
+        """For the discretization size of the network, we propose a size h_approx and then 
+        calculate based on that value the discretization size self.h on each vessel
+        
+        Since some vessels are too short to keep a discretization size close to h_approx, for
+        those specific cases h_approx is divided by three to ensure every vessel is composed of
+        at least 3 cylinders"""
         h=np.zeros(len(self.L), dtype=np.float64)
         for i in range(len(self.L)):
             if np.around(self.L[i]/h_approx) > 3:
@@ -69,7 +77,7 @@ class mesh_1D():
         self.cells=self.cells.astype(int)
         self.h=h
         return h
-    def pos_arrays(self, mesh_3D):
+    def PositionalArrays(self, mesh_3D):
         """This function is the pre processing step. It is meant to create the s_blocks
         and uni_s_blocks arrays which will be used extensively throughout. s_blocks represents
         the block where each source is located, uni_s_blocks contains all the source blocks
@@ -77,9 +85,15 @@ class mesh_1D():
         
             - h_cart is the size of the cartesian mesh
             
-        THIS IS DEPRECATED, THE FASTER FUNCTION WITH @NJIT IS DEFINED BELOW"""
+        THIS IS DEPRECATED, THE FASTER FUNCTION WITH @NJIT IS DEFINED BELOW
+        
+        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        SHOULD BE DELETED SOON
+        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""
             
         # pos_s will dictate the ID of the sources by the order they are kept in it!
+        print("THIS FUNCTION IS DEPRECATED!!")
+        
         s_blocks = np.array([]).astype(int)
         uni_s_blocks = np.array([], dtype=int)
         self.a_array=np.zeros((0,3))
@@ -92,7 +106,7 @@ class mesh_1D():
             self.a_array=np.vstack((self.a_array, u[0]))
             self.b_array=np.vstack((self.b_array, u[1]))
             
-            s_blocks=np.append(s_blocks, get_id(mesh_3D.h,mesh_3D.cells_x, mesh_3D.cells_y, mesh_3D.cells_z,x_j))
+            s_blocks=np.append(s_blocks, GetID(mesh_3D.h,mesh_3D.cells_x, mesh_3D.cells_y, mesh_3D.cells_z,x_j))
 # =============================================================================
 #             if s_blocks[-1] not in uni_s_blocks:
 #                 uni_s_blocks = np.append(uni_s_blocks, s_blocks[-1])
@@ -103,12 +117,13 @@ class mesh_1D():
         total_sb = len(uni_s_blocks)  # total amount of source blocks
         self.total_sb = total_sb
         
-    def pos_arrays_fast(self, mesh_3D):
-        self.s_blocks, self.uni_s_blocks,_=pos_arrays_optimized(self.source_edge, self.pos_s, self.tau, self.h, 
+    def PositionalArraysFast(self, mesh_3D):
+        self.s_blocks, self.sources_per_block, self.quant_sources_per_block=PositionalArraysFast(self.source_edge, self.pos_s, self.tau, self.h, 
                                                               mesh_3D.h, mesh_3D.cells_x, mesh_3D.cells_y, mesh_3D.cells_z)
+        self.uni_s_blocks, self.counts = np.unique(self.s_blocks, return_counts=True)
         return 
     
-    def kernel_point(self,x, neighbourhood, function, D):
+    def KernelPoint(self,x, neighbourhood, function, D):
         #Maybe we should put this function independently so it can be jitted
         """Returns the kernels to multiply the vectors of unknowns q and C_v
         function K and D are useless"""
@@ -126,10 +141,10 @@ class mesh_1D():
             #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-a, tau)**2<(self.h[ed]+self.R[ed])**2) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
             #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-b, tau)>(self.R[ed])) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
             if (np.sum((x-self.pos_s[i])**2) < dist_sq):
-                q=get_self_influence(self.R[ed], self.h[ed], D)
+                q=GetSelfInfluence(self.R[ed], self.h[ed], D)
                 
             else:
-                q=get_source_potential(a,b,x,D)
+                q=GetSourcePotential(a,b,x,D)
                 ########################
                 #Coefficients due to geometry are already added!
                 ########################
@@ -141,10 +156,10 @@ class mesh_1D():
         return q_array,  sources
 
 @njit
-def kernel_point_optimized(x, neighbourhood, s_blocks, source_edge, tau_array, pos_s, h_1D, R,D):
+def KernelPointFast(x, neighbourhood, s_blocks, source_edge, tau_array, pos_s, h_1D, R,D):
     #Maybe we should put this function independently so it can be jitted
     """Returns the kernels to multiply the vectors of unknowns q and C_v
-    function K and D are useless"""
+    to obtain the rapid term"""
     
     sources=np.arange(len(s_blocks))[in1D(s_blocks, neighbourhood)]
     q_array=np.zeros(0, np.float64)
@@ -158,10 +173,10 @@ def kernel_point_optimized(x, neighbourhood, s_blocks, source_edge, tau_array, p
         #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-b, tau)>(self.R[ed])) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
         
         if (np.sum((x-pos_s[i])**2) < dist_sq):
-            q=get_self_influence(R[ed], h_1D[ed], D)
+            q=GetSelfInfluence(R[ed], h_1D[ed], D)
             
         else:
-            q=get_source_potential(a,b,x,D)
+            q=GetSourcePotential(a,b,x,D)
             ########################
             #Coefficients due to geometry are already added!
             ########################
@@ -172,7 +187,7 @@ def kernel_point_optimized(x, neighbourhood, s_blocks, source_edge, tau_array, p
     return q_array,  sources
     
 # =============================================================================
-#     def kernel_integral_surface(self, center,normal, neighbourhood,function, K,D,h):
+#     def KernelIntegralSurface(self, center,normal, neighbourhood,function, K,D,h):
 #         """Returns the kernel that multiplied (scalar, dot) by the array of fluxes (q) returns
 #         the integral of the rapid term over the surface
 #         
@@ -187,7 +202,7 @@ def kernel_point_optimized(x, neighbourhood, s_blocks, source_edge, tau_array, p
 #         for i in sources:
 #             ed=self.source_edge[i]
 #             a,b= self.pos_s[i]-self.tau[ed]*self.h[ed]/2, self.pos_s[i]+self.tau[ed]*self.h[ed]/2
-#             q=Simpson_surface(a,b,function, center,h, normal,D)
+#             q=SimpsonSurface(a,b,function, center,h, normal,D)
 # 
 #             q_array=np.append(q_array, q)
 #         
@@ -195,7 +210,7 @@ def kernel_point_optimized(x, neighbourhood, s_blocks, source_edge, tau_array, p
 #         return q_array,  sources
 # =============================================================================
 @njit
-def pos_arrays_optimized(source_edge, pos_s, tau, h_1D, h_3D, cells_x, cells_y, cells_z, ):
+def PositionalArraysFast(source_edge, pos_s, tau, h_1D, h_3D, cells_x, cells_y, cells_z, ):
     """This function is the pre processing step. It is meant to create the s_blocks
     and uni_s_blocks arrays which will be used extensively throughout. s_blocks represents
     the block where each source is located, uni_s_blocks contains all the source blocks
@@ -210,17 +225,18 @@ def pos_arrays_optimized(source_edge, pos_s, tau, h_1D, h_3D, cells_x, cells_y, 
         ed=source_edge[i] #Current edge (int) the source lies on 
         x_j=pos_s[i] #Center of the cylinder
         
-        s_blocks=np.append(s_blocks, get_id(h_3D,cells_x, cells_y, cells_z,x_j))
-
-    s_blocks=s_blocks
-    uni_s_blocks = np.unique(s_blocks)
-
-    total_sb = len(uni_s_blocks)  # total amount of source blocks
-    total_sb = total_sb
-    return s_blocks, uni_s_blocks, total_sb
+        s_blocks=np.append(s_blocks, GetID(h_3D,cells_x, cells_y, cells_z,x_j))
+    sources_per_block=List()   
+    quant_sources_per_block=np.zeros(0, dtype=np.int64)
+    for k in range(cells_x*cells_y*cells_z):
+        arr=np.where(s_blocks==k)[0]
+        sources_per_block.append(arr)
+        quant_sources_per_block=np.append(quant_sources_per_block,len(arr))
+    
+    return s_blocks, sources_per_block, quant_sources_per_block
     
 @njit
-def kernel_integral_surface_optimized(s_blocks, tau, h_net, pos_s, source_edge,center, normal, neighbourhood, function, D, h_3D):
+def KernelIntegralSurfaceFast(s_blocks, tau, h_net, pos_s, source_edge,center, normal, neighbourhood, function, D, h_3D):
     """Returns the kernel that multiplied (scalar, dot) by the array of fluxes (q) returns
     the integral of the rapid term over the surface
     
@@ -235,7 +251,7 @@ def kernel_integral_surface_optimized(s_blocks, tau, h_net, pos_s, source_edge,c
     for i in sources:
         ed=source_edge[i]
         a,b= pos_s[i]-tau[ed]*h_net[ed]/2, pos_s[i]+tau[ed]*h_net[ed]/2
-        q_array[c]=Simpson_surface(a,b,function, center,h_3D, normal,D)
+        q_array[c]=SimpsonSurface(a,b,function, center,h_3D, normal,D)
         c+=1
     return q_array,  sources
 
@@ -264,7 +280,7 @@ def test_kernel_integral():
     
     a.s_blocks=np.zeros(10)
     
-    pp=a.kernel_integral_surface(np.array([0,0,h_mesh/2]), np.array([0,0,1]), np.zeros(10), 'G', np.array([1]),1,h_mesh)
+    pp=a.KernelIntegralSurface(np.array([0,0,h_mesh/2]), np.array([0,0,1]), np.zeros(10), 'G', np.array([1]),1,h_mesh)
     
     print("If h_mesh is sufficiently greater than L_vessel this should be around -0.198: ", np.sum(pp[0])*h_mesh**2/L_vessel)
     

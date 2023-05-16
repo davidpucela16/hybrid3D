@@ -9,19 +9,33 @@ import numpy as np
 from numba import njit
 
 @njit
+def GetBoundaryStatus(coords, h_3D, cells_x, cells_y, cells_z):
+    """I need this to be out of the class to be able to be called by the InterpolatePhiBar"""
+    bound_status=np.zeros(0, dtype=np.int64) #array that contains the boundaries that lie less than h/2 from the point
+    if int(coords[0]/(h_3D/2))==0: bound_status=np.append(bound_status, 5) #down
+    elif int(coords[0]/(h_3D/2))==2*cells_x-1: bound_status=np.append(bound_status, 4) #top
+    if int(coords[1]/(h_3D/2))==0: bound_status=np.append(bound_status, 3) #west
+    elif int(coords[1]/(h_3D/2))==2*cells_y-1: bound_status=np.append(bound_status, 2) #east
+    if int(coords[2]/(h_3D/2))==0: bound_status=np.append(bound_status, 1) #south
+    elif int(coords[2]/(h_3D/2))==2*cells_z-1: bound_status=np.append(bound_status, 0) #north
+    return bound_status
+
+
+
+@njit
 def in1D(arr1, arr2):
     """Return a boolean array indicating which elements of `arr1` are in `arr2`."""
     arr2_sorted = np.sort(arr2)
     indices = np.searchsorted(arr2_sorted, arr1)
     return (arr2_sorted[indices] == arr1)
 
-def append_sparse(arr, d, r, c):
+def AppendSparse(arr, d, r, c):
     data_arr=np.append(arr[0], d)
     row_arr=np.append(arr[1], r)
     col_arr=np.append(arr[2], c)
     return(data_arr, row_arr, col_arr)
 @njit
-def trilinear_interpolation(pos, h):
+def TrilinearInterpolation(pos, h):
     """"""
     #The following is the equivalent of the operator % but I wanna make sure it works
     pos=pos-h/2
@@ -43,8 +57,8 @@ def trilinear_interpolation(pos, h):
     return A
 
 
-def auto_trilinear_interpolation(x, nodes):
-    """Before calling trilinear_interpolation, this function takes the nodes 
+def auto_TrilinearInterpolation(x, nodes):
+    """Before calling TrilinearInterpolation, this function takes the nodes 
     as arguments and reorganizes them in the correct order"""
     
     coords=np.zeros((0,3))
@@ -61,11 +75,11 @@ def auto_trilinear_interpolation(x, nodes):
     order[np.where(coords[1,:])==coords[zeroth]+hy]+=2
     order[np.where(coords[2,:])==coords[zeroth]+hz]+=1
     
-    return trilinear_interpolation(x, np.array([hx,hy, hz]))[order]
+    return TrilinearInterpolation(x, np.array([hx,hy, hz]))[order]
     
 
 
-def for_boundary_get_normal(bound_num):
+def FromBoundaryGetNormal(bound_num):
     normal=np.array([[0,0,1],
                      [0,0,-1],
                      [0,1,0],

@@ -11,25 +11,26 @@ os.chdir(path)
 import numpy as np 
 import pdb 
 import matplotlib.pyplot as plt
-from neighbourhood import get_neighbourhood, get_uncommon
-from small_functions import trilinear_interpolation, auto_trilinear_interpolation
-from small_functions import for_boundary_get_normal, append_sparse
+from neighbourhood import GetNeighbourhood, GetUncommon
+from small_functions import TrilinearInterpolation, auto_TrilinearInterpolation
+from small_functions import FromBoundaryGetNormal, AppendSparse, GetBoundaryStatus
 from scipy.sparse.linalg import spsolve as dir_solve
-from assembly import Assembly_diffusion_3D_boundaries, Assembly_diffusion_3D_interior
+from assembly import AssemblyDiffusion3DBoundaries, AssemblyDiffusion3DInterior
+from Second_eq_functions import node, InterpolateFast,GetInterpolationKernelFast,GetI1Fast, InterpolatePhiBarBlock, RetrievePhiBar
 
 import scipy as sp
 from scipy.sparse import csc_matrix
 
 import multiprocessing
 from multiprocessing import Pool
-from assembly_1D import full_adv_diff_1D
+from assembly_1D import FullAdvectionDiffusion1D
 
 from numba.typed import List
 
-from mesh import get_id, get_8_closest
-from mesh_1D import kernel_integral_surface_optimized, kernel_point_optimized
+from mesh import GetID, Get8Closest
+from mesh_1D import KernelIntegralSurfaceFast, KernelPointFast
 from small_functions import in1D
-from Green_optimized import Simpson_surface
+from GreenFast import SimpsonSurface
 
 from numba import njit, prange
 from numba.experimental import jitclass
@@ -37,6 +38,10 @@ from numba import int64, float64
 from numba import int64, types, typed
 import numba as nb
 import matplotlib.pylab as pylab
+
+import dask
+from dask import delayed
+
 plt.style.use('default')
 params = {'legend.fontsize': 'x-large',
           'figure.figsize': (15,15),
@@ -48,6 +53,9 @@ params = {'legend.fontsize': 'x-large',
          'lines.linewidth': 2,
          'lines.markersize': 15}
 pylab.rcParams.update(params)
+
+import time
+
 
 class hybrid_set_up():
     def __init__(self, mesh_3D, mesh_1D,  BC_type, BC_value,n, D, K, BCs_1D):
@@ -66,16 +74,19 @@ class hybrid_set_up():
         
         self.n=n
         
-        self.mesh_3D.get_ordered_connect_matrix()
+        self.mesh_3D.GetOrderedConnectivityMatrix()
         
         self.F=self.mesh_3D.size_mesh
         self.S=len(mesh_1D.pos_s)
         
-        self.determine_max_size()
+        self.DetermineMaxSize()
+        
+        self.B_path=0 #Path to the B matrix. If not 0, it means the B_matrix is already computed and saved 
+        self.var_phi_bar=0 #If not 0, it means the B_matrix is already computed and saved 
         
         return
     
-    def determine_max_size(self):
+    def DetermineMaxSize(self):
         """When assembling the relevant arrays for the sparse matrices, normally I use np.concatenate to 
         sequentially append the new values of the kernels. However, this is a very inneficient method, it 
         is better to declare a size of the arrays, and then fill them up sequentially. For that task, it is 
@@ -83,16 +94,20 @@ class hybrid_set_up():
         s_blocks_unique=self.mesh_1D.uni_s_blocks #each FV cell that contains a source
         s_blocks_count=self.mesh_1D.counts #how many sources each block has
         
-        max_size=np.sum(np.sort(s_blocks_count)[::-1][:self.n**3]) #Adds up all the sources in the n**2 most populated blocks
-        #At no point will an array comming fror a kernel_point or kernel_surface contain more than max_size entries
+        max_size=np.sum(np.sort(s_blocks_count)[::-1][:(self.n*2+1)**3]) #Adds up all the sources in the n**2 most populated blocks
+        #At no point will an array comming fror a KernelPoint or kernel_surface contain more than max_size entries
         self.max_size=max_size
         return 
     
-    def Assembly_A_B_C(self):
-        A_matrix=self.Assembly_A()
+    def AssemblyABC(self):
+        A_matrix=self.AssemblyA()
         self.A_matrix=A_matrix
-        B_matrix=self.Assembly_B_optimized()
-        B_matrix=self.Assembly_B_boundaries(B_matrix)
+        if not self.B_path:
+            B_matrix=self.Assembly_BFast()
+            B_matrix=self.AssemblyBBoundaries(B_matrix)
+        else:
+            B_matrix=sp.sparse.load_npz(self.B_path + "/B_matrix.npz")
+            
         self.B_matrix=B_matrix
         
         C_matrix=csc_matrix((self.mesh_3D.size_mesh, len(self.mesh_1D.pos_s)))
@@ -102,164 +117,38 @@ class hybrid_set_up():
         self.A_B_C_matrix=A_B_C
         return(A_B_C)
     
-    def Assembly_D_E_F(self):
-        
-        D=np.zeros([3,0])
-        E=np.zeros([3,0])
-        F=np.zeros([3,0])
-        
-        #The following are important matrices that are interesting to keep separated
-        #Afterwards they can be used to assemble the D, E, F matrices
-        G_ij=np.zeros([3,0])
-        H_ij=np.zeros([3,0])
-        Permeability=np.zeros([3,0])
-        
-        for j in range(len(self.mesh_1D.s_blocks)):
-            kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=self.interpolate(self.mesh_1D.pos_s[j])
-            D=append_sparse(D, kernel_s,np.zeros(len(col_s))+j, col_s)
-            E=append_sparse(E, kernel_q,np.zeros(len(col_q))+j, col_q)
-            
-            G_ij=append_sparse(G_ij, kernel_q,np.zeros(len(col_q))+j, col_q)
-            
-            if len(kernel_C_v)!=len(col_C_v): pdb.set_trace()
-            
-            F=append_sparse(F, kernel_C_v,np.zeros(len(col_C_v))+j, col_C_v)
-            H_ij=append_sparse(H_ij, kernel_C_v,np.zeros(len(col_C_v))+j, col_C_v)
-            
-            E=append_sparse(E, 1/self.K[self.mesh_1D.source_edge[j]] , j, j)
-            Permeability=append_sparse(Permeability, 1/self.K[self.mesh_1D.source_edge[j]] , j, j)
-        F=append_sparse(F, -np.ones(len(self.mesh_1D.s_blocks)) , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
-            
-        self.D_matrix=csc_matrix((D[0], (D[1], D[2])), shape=(len(self.mesh_1D.pos_s), self.mesh_3D.size_mesh))
-        self.E_matrix=csc_matrix((E[0], (E[1], E[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-        self.F_matrix=csc_matrix((F[0], (F[1], F[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-        
-        self.G_ij=csc_matrix((G_ij[0], (G_ij[1], G_ij[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-        self.H_ij=csc_matrix((H_ij[0], (H_ij[1], H_ij[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-        self.Permeability=csc_matrix((Permeability[0], (Permeability[1], Permeability[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
-        
-        return sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
-    
-    def Assembly_D_E_F_fast(self):
-        
-        kernel_s,row_s, col_s,kernel_q, row_q, col_q,_,_,_=self.Interpolate_phi_bar()
-        
-        self.D_matrix=csc_matrix((kernel_s, (row_s, col_s)), shape=(len(self.mesh_1D.s_blocks),self.mesh_3D.size_mesh))
-        
-        q_portion_diagonal=np.repeat(1/self.K, self.mesh_1D.cells) #q_j/K_j
-        
-        self.Gij=csc_matrix((kernel_q, (row_q, col_q)), shape=(len(self.mesh_1D.s_blocks),len(self.mesh_1D.s_blocks)))  
-        self.q_portion=sp.sparse.diags(q_portion_diagonal)
-        
-        self.E_matrix=self.Gij+self.q_portion
-        
-        self.F_matrix=-sp.sparse.diags(np.ones(len(self.mesh_1D.s_blocks)))
-        
-        self.D_E_F_matrix=sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
-        
-        return self.D_E_F_matrix
-        
-        
-    def Interpolate_phi_bar(self): 
-        """Calculates the kernels to sequentially estimate the wall concentration"""
-        kernel_s,row_s, col_s,kernel_q, row_q, col_q,kernel_C_v,row_C_v, col_C_v=Interpolate_phi_bar_fast(self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z, self.mesh_3D.h,
-                                                                                     self.mesh_3D.pos_cells,self.mesh_1D.s_blocks, self.mesh_1D.source_edge,self.mesh_1D.tau, self.mesh_1D.pos_s, self.mesh_1D.h, 
-                                                                                     self.R, self.D)
-        return kernel_s,row_s, col_s,kernel_q, row_q, col_q,kernel_C_v,row_C_v, col_C_v
-                                                                                        
-    
-    def Assembly_G_H_I(self):
-        I_matrix=self.Assembly_I()
-        
-        #WILL CHANGE WHEN CONSIDERING MORE THAN 1 VESSEL
-        aux_arr=np.zeros(len(self.mesh_1D.pos_s))
-        #H matrix for multiple vessels
-        for ed in range(len(self.R)): #Loop through every vessel
-            DoFs=np.arange(np.sum(self.mesh_1D.cells[:ed]),np.sum(self.mesh_1D.cells[:ed])+np.sum(self.mesh_1D.cells[ed])) #DoFs belonging to this vessel
-            aux_arr[DoFs]=self.mesh_1D.h[ed]/(np.pi*self.mesh_1D.R[ed]**2)
-        H_matrix=sp.sparse.diags(aux_arr, 0)
-        self.H_matrix=H_matrix
-        
-        #Matrix full of zeros:
-        G_matrix=csc_matrix(( len(self.mesh_1D.pos_s),self.mesh_3D.size_mesh))
-        self.G_matrix=G_matrix
-        self.G_H_I_matrix=sp.sparse.hstack((G_matrix, H_matrix, I_matrix))
-        
-        return(self.G_H_I_matrix)
-    
-    def reAssembly_matrices(self):
-        Upper=sp.sparse.hstack((self.A_matrix, self.B_matrix, self.C_matrix))
-        Middle=sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
-        Down=sp.sparse.hstack((self.G_matrix, self.H_matrix, self.I_matrix))
-        
-        Full_linear_matrix=sp.sparse.vstack((Upper,
-                                             Middle,
-                                             Down))
-        
-        return Full_linear_matrix
-    
-    def Assembly_problem(self):
-        Full_linear_matrix=sp.sparse.vstack((self.Assembly_A_B_C(),
-                                             self.Assembly_D_E_F(),
-                                             self.Assembly_G_H_I()))
-        self.Full_linear_matrix=Full_linear_matrix
-        
-        self.Full_ind_array=np.concatenate((self.I_ind_array, np.zeros(len(self.mesh_1D.pos_s)), self.III_ind_array))
-        return
-    def Solve_problem(self):
-        sol=dir_solve(self.Full_linear_matrix, -self.Full_ind_array)
-        self.s=sol[:self.mesh_3D.size_mesh]
-        self.q=sol[self.mesh_3D.size_mesh:-self.S]
-        self.Cv=sol[-self.S:]
-        return
-        
-    def Assembly_A(self):
+    def AssemblyA(self):
         """An h is missing somewhere to be consistent"""
         size=self.mesh_3D.size_mesh
         
-        a=Assembly_diffusion_3D_interior(self.mesh_3D)
-        b=Assembly_diffusion_3D_boundaries(self.mesh_3D, self.BC_type, self.BC_value)
+        a=AssemblyDiffusion3DInterior(self.mesh_3D)
+        b=AssemblyDiffusion3DBoundaries(self.mesh_3D, self.BC_type, self.BC_value)
         
         # =============================================================================
         #         NOTICE HERE, THIS IS WHERE WE MULTIPLY BY h so to make it dimensionally consistent relative to the FV integration
         A_matrix=csc_matrix((a[2]*self.mesh_3D.h, (a[0], a[1])), shape=(size,size)) + csc_matrix((b[2]*self.mesh_3D.h, (b[0], b[1])), shape=(size, size))
         #       We only multiply the non boundary part of the matrix by h because in the boundaries assembly we need to include the h due to the difference
-        #       between the Neumann and Dirichlet boundary conditions. In short Assembly_diffusion_3D_interior returns data that needs to be multiplied by h 
-        #       while Assembly_diffusion_3D_boundaries is already dimensionally consistent
+        #       between the Neumann and Dirichlet boundary conditions. In short AssemblyDiffusion3DInterior returns data that needs to be multiplied by h 
+        #       while AssemblyDiffusion3DBoundaries is already dimensionally consistent
         # =============================================================================
         self.I_ind_array=b[3]*self.mesh_3D.h
         
         
         return A_matrix
     
-    
-    def Assembly_B_optimized(self):
+    def Assembly_BFast(self):
         
         mesh=self.mesh_3D
         nmb_ordered_connect_matrix = List(mesh.ordered_connect_matrix)
         net=self.mesh_1D
-        B_data, B_row, B_col=Assembly_B_arrays_optimized(nmb_ordered_connect_matrix, mesh.size_mesh, self.n, self.D,
+        B_data, B_row, B_col=AssemblyBArraysFast(nmb_ordered_connect_matrix, mesh.size_mesh, self.n, self.D,
                                     mesh.cells_x, mesh.cells_y, mesh.cells_z, mesh.pos_cells, mesh.h, 
                                     net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge)
         #HERE IS WHERE WE MULTIPLY BY H!!!!!
         self.B_matrix=csc_matrix((B_data*mesh.h, (B_row, B_col)), (mesh.size_mesh, len(self.mesh_1D.s_blocks)))
         return self.B_matrix
     
-# =============================================================================
-#     def Assembly_B_parallel(self):
-#         
-#         mesh=self.mesh_3D
-#         nmb_ordered_connect_matrix = List(mesh.ordered_connect_matrix)
-#         net=self.mesh_1D
-#         B_data, B_row, B_col=Assembly_B_arrays_parallel(nmb_ordered_connect_matrix, mesh.size_mesh, self.n, self.D,
-#                                     mesh.cells_x, mesh.cells_y, mesh.cells_z, mesh.pos_cells, mesh.h, 
-#                                     net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge)
-#         #HERE IS WHERE WE MULTIPLY BY H!!!!!
-#         self.B_matrix=csc_matrix((B_data*mesh.h, (B_row, B_col)), (mesh.size_mesh, len(self.mesh_1D.s_blocks)))
-#         return self.B_matrix
-# =============================================================================
-            
-    def Assembly_B_boundaries(self, B):
+    def AssemblyBBoundaries(self, B):
 
         B=B.tolil()
         
@@ -278,17 +167,17 @@ class hybrid_set_up():
         #This loop goes through each of the boundary cells, and it goes repeatedly 
         #through the edges and corners accordingly
             for k in bound: #Make sure this is the correct boundary variable
-                k_neigh=get_neighbourhood(self.n, mesh.cells_x, mesh.cells_y, mesh.cells_z, k)
+                k_neigh=GetNeighbourhood(self.n, mesh.cells_x, mesh.cells_y, mesh.cells_z, k)
                 
-                pos_k=mesh.get_coords(k)
+                pos_k=mesh.GetCoords(k)
                 normal=normals[c]
                 pos_boundary=pos_k+normal*h/2
                 if self.BC_type[c]=="Dirichlet":
-                    r_k=kernel_integral_surface_optimized(net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge,
+                    r_k=KernelIntegralSurfaceFast(net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge,
                                                           pos_boundary, normal,  k_neigh, 'P', self.D, self.mesh_3D.h)
                     
                 if self.BC_type[c]=="Neumann":
-                    r_k=kernel_integral_surface_optimized(net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge,
+                    r_k=KernelIntegralSurfaceFast(net.s_blocks, net.tau, net.h, net.pos_s, net.source_edge,
                                                           pos_boundary, normal,  k_neigh, 'G', self.D, self.mesh_3D.h)
                 
                 kernel=csc_matrix((r_k[0]*h**2,(np.zeros(len(r_k[0])),r_k[1])), shape=(1,len(self.mesh_1D.s_blocks)))
@@ -296,10 +185,117 @@ class hybrid_set_up():
             c+=1
             
         return(B)
-        
-     
     
-    def Assembly_I(self):
+    def AssemblyDEF(self):
+        """Deprecated, use the fast version instead"""
+        print()
+        print("Deprecated, use the fast version instead")
+        print()
+        D=np.zeros([3,0])
+        E=np.zeros([3,0])
+        F=np.zeros([3,0])
+        
+        #The following are important matrices that are interesting to keep separated
+        #Afterwards they can be used to assemble the D, E, F matrices
+        G_ij=np.zeros([3,0])
+        #H_ij=np.zeros([3,0])
+        Permeability=np.zeros([3,0])
+        
+        for j in range(len(self.mesh_1D.s_blocks)):
+            print("Assembling D_E_F slow, source: ", j)
+            kernel_s,col_s,kernel_q, col_q=self.Interpolate(self.mesh_1D.pos_s[j])
+            D=AppendSparse(D, kernel_s,np.zeros(len(col_s))+j, col_s)
+            E=AppendSparse(E, kernel_q,np.zeros(len(col_q))+j, col_q)
+            
+            G_ij=AppendSparse(G_ij, kernel_q,np.zeros(len(col_q))+j, col_q)
+            
+            
+            E=AppendSparse(E, 1/self.K[self.mesh_1D.source_edge[j]] , j, j)
+            Permeability=AppendSparse(Permeability, 1/self.K[self.mesh_1D.source_edge[j]] , j, j)
+        F=AppendSparse(F, -np.ones(len(self.mesh_1D.s_blocks)) , np.arange(len(self.mesh_1D.s_blocks)), np.arange(len(self.mesh_1D.s_blocks)))
+            
+        self.D_matrix_slow=csc_matrix((D[0], (D[1], D[2])), shape=(len(self.mesh_1D.pos_s), self.mesh_3D.size_mesh))
+        self.E_matrix_slow=csc_matrix((E[0], (E[1], E[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        self.F_matrix_slow=csc_matrix((F[0], (F[1], F[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        
+        self.G_ij_slow=csc_matrix((G_ij[0], (G_ij[1], G_ij[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        #self.H_ij=csc_matrix((H_ij[0], (H_ij[1], H_ij[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        self.Permeability=csc_matrix((Permeability[0], (Permeability[1], Permeability[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+        
+        return sp.sparse.hstack((self.D_matrix_slow, self.E_matrix_slow, self.F_matrix_slow))
+    
+    def AssemblyDEFFast(self, path_phi_bar):
+        if self.var_phi_bar:
+            self.InterpolatePhiFullFast(path_phi_bar, 1)
+        self.phi_bar_s, self.Gij=RetrievePhiBar(path_phi_bar,self.S, self.mesh_3D.size_mesh, self.mesh_1D.uni_s_blocks)
+        
+        self.D_matrix=self.phi_bar_s
+        
+        q_portion_diagonal=np.repeat(1/self.K, self.mesh_1D.cells) #q_j/K_j
+        
+        self.q_portion=sp.sparse.diags(q_portion_diagonal)
+        
+        self.E_matrix=self.Gij+self.q_portion
+        
+        self.F_matrix=-sp.sparse.diags(np.ones(len(self.mesh_1D.s_blocks)))
+        
+        self.D_E_F_matrix=sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
+        
+        return self.D_E_F_matrix
+        
+    def InterpolatePhiFullFast(self, path, num_processes):
+        
+        args=path,self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z, self.mesh_3D.h,self.mesh_3D.pos_cells,self.mesh_1D.s_blocks, self.mesh_1D.source_edge,self.mesh_1D.tau, self.mesh_1D.pos_s, self.mesh_1D.h, self.mesh_1D.R, self.D,self.mesh_1D.sources_per_block, self.mesh_1D.quant_sources_per_block
+        a=[]
+        for i in self.mesh_1D.uni_s_blocks:
+            a.append(PhiBarHelper((i, args)))
+
+        dask.compute(a)
+        return 
+    
+    def RetrievePhiBar(self, path):
+        kernel_q=np.zeros(0, dtype=np.float64)
+        kernel_s=np.zeros(0, dtype=np.float64)
+        #The kernels with the positions
+        col_s=np.zeros(0, dtype=np.int64)
+        col_q=np.zeros(0, dtype=np.int64)
+        
+        row_s=np.zeros(0, dtype=np.int64)
+        row_q=np.zeros(0, dtype=np.int64)
+        
+        for i in self.mesh_1D.uni_s_blocks:
+            kernel_s=np.concatenate((kernel_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
+            kernel_q=np.concatenate((kernel_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
+            col_s=np.concatenate((col_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
+            col_q=np.concatenate((col_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
+            row_s=np.concatenate((row_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
+            row_q=np.concatenate((row_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
+            
+            
+        return kernel_s,row_s, col_s,kernel_q, row_q, col_q
+
+    def AssemblyGHI(self):
+        I_matrix=self.AssemblyI()
+        
+        #WILL CHANGE WHEN CONSIDERING MORE THAN 1 VESSEL
+        aux_arr=np.zeros(len(self.mesh_1D.pos_s))
+        #H matrix for multiple vessels
+        for ed in range(len(self.R)): #Loop through every vessel
+            DoFs=np.arange(np.sum(self.mesh_1D.cells[:ed]),np.sum(self.mesh_1D.cells[:ed])+np.sum(self.mesh_1D.cells[ed])) #DoFs belonging to this vessel
+            aux_arr[DoFs]=self.mesh_1D.h[ed]/(np.pi*self.mesh_1D.R[ed]**2)
+            self.aux_arr=aux_arr #I should check if I can do the previous operation with np.repeat
+        
+        H_matrix=sp.sparse.diags(aux_arr, 0)
+        self.H_matrix=H_matrix
+        
+        #Matrix full of zeros:
+        G_matrix=csc_matrix(( len(self.mesh_1D.pos_s),self.mesh_3D.size_mesh))
+        self.G_matrix=G_matrix
+        self.G_H_I_matrix=sp.sparse.hstack((G_matrix, H_matrix, I_matrix))
+        
+        return(self.G_H_I_matrix)
+    
+    def AssemblyI(self):
         """Models intravascular transport. Advection-diffusion equation
         
         FOR NOW IT ONLY HANDLES A SINGLE VESSEL"""
@@ -307,9 +303,9 @@ class hybrid_set_up():
         D=self.mesh_1D.D
         U=self.mesh_1D.U
         L=self.mesh_1D.L
-        aa, ind_array, DoF=full_adv_diff_1D(U, D, self.mesh_1D.h, self.mesh_1D.cells, self.mesh_1D.startVertex, self.mesh_1D.vertex_to_edge, self.R, self.BCs_1D)
+        aa, ind_array, DoF=FullAdvectionDiffusion1D(U, D, self.mesh_1D.h, self.mesh_1D.cells, self.mesh_1D.startVertex, self.mesh_1D.vertex_to_edge, self.R, self.BCs_1D)
 # =============================================================================
-#         aa, bb =assemble_transport_1D(U, D, L[0]/len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s))
+#         aa, bb =AssemblyTransport1D(U, D, L[0]/len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s))
 #         self.III_ind_array = np.zeros(len(self.mesh_1D.pos_s))
 #         self.III_ind_array [0] = bb[0]
 # =============================================================================
@@ -319,380 +315,63 @@ class hybrid_set_up():
         self.I_matrix=I
         
         return I
-
-    def get_coord_reconst(self,corners, resolution):
-        """Corners given in order (0,0),(0,1),(1,0),(1,1)
-        
-        This function is to obtain the a posteriori reconstruction of the field
-        
-        OUTDATED, NOT PARALLEL"""
-        crds=np.zeros((0,3))
-        tau=(corners[2]-corners[0])/resolution
-        
-        h=(corners[1]-corners[0])/resolution
-        L_h=np.linalg.norm((corners[1]-corners[0]))
-        
-        local_array= np.linspace(corners[0]+h/2, corners[1]-h/2 , resolution )
-        for j in range(resolution):
-            arr=local_array.copy()
-            arr[:,0]+=tau[0]*(j+1/2)
-            arr[:,1]+=tau[1]*(j+1/2)
-            arr[:,2]+=tau[2]*(j+1/2)
-            
-            crds=np.vstack((crds, arr))
-        rec=np.array([])
-        
-        for k in crds:
-            a,b,c,d,e,f=self.interpolate(k)
-            rec=np.append(rec,a.dot(self.s[b])+c.dot(self.q[d]))
-            
-        return crds, rec
-            
     
-    def get_coord_reconst_chat(self, corners, resolution, num_processes=4):
-        """Corners given in order (0,0),(0,1),(1,0),(1,1)
+    def AssemblyProblem(self, path_phi_bar):
+        Full_linear_matrix=sp.sparse.vstack((self.AssemblyABC(),
+                                             self.AssemblyDEFFast(path_phi_bar),
+                                             self.AssemblyGHI()))
+        self.Full_linear_matrix=Full_linear_matrix
         
-        This function is to obtain the a posteriori reconstruction of the field"""
-        print("Number of processes= ", num_processes)
-        crds=np.zeros((0,3))
-        tau=(corners[2]-corners[0])/resolution
-        
-        h=(corners[1]-corners[0])/resolution
-        L_h=np.linalg.norm((corners[1]-corners[0]))
-        
-        local_array= np.linspace(corners[0]+h/2, corners[1]-h/2 , resolution )
-        for j in range(resolution):
-            arr=local_array.copy()
-            arr[:,0]+=tau[0]*(j+1/2)
-            arr[:,1]+=tau[1]*(j+1/2)
-            arr[:,2]+=tau[2]*(j+1/2)
-            
-            crds=np.vstack((crds, arr))
-        
-# =============================================================================
-#         # Create a pool of worker processes
-#         pool = Pool(processes=num_processes)
-#         
-#         # Use map function to apply interpolate_helper to each coordinate in parallel
-#         results = pool.map(interpolate_helper, [(self, k) for k in crds])
-#         
-#         # Close the pool to free up resources
-#         pool.close()
-#         pool.join()
-#         
-#         # Convert the results to a numpy array
-#         rec = np.array(results)
-# =============================================================================
-        rec=np.array([])        
-        for k in crds:
-            rec=np.append(rec, interpolate_helper((self, k)))
-        
-        return crds, rec     
+        self.Full_ind_array=np.concatenate((self.I_ind_array, np.zeros(len(self.mesh_1D.pos_s)), self.III_ind_array))
+        return
     
-    def get_coord_reconst_center(self, corners):
-        """Corners given in order (0,0),(0,1),(1,0),(1,1)
+    def ReAssemblyMatrices(self):
+        Upper=sp.sparse.hstack((self.A_matrix, self.B_matrix, self.C_matrix))
+        Middle=sp.sparse.hstack((self.D_matrix, self.E_matrix, self.F_matrix))
+        Down=sp.sparse.hstack((self.G_matrix, self.H_matrix, self.I_matrix))
         
-        Returns the coarse reconstruction, cell center"""
+        self.Middle=Middle
         
-        tau_1=corners[1]-corners[0]
-        tau_1=tau_1/np.linalg.norm(tau_1)
-        tau_2=corners[2]-corners[0]
-        tau_2=tau_2/np.linalg.norm(tau_2)
+        Full_linear_matrix=sp.sparse.vstack((Upper,
+                                             Middle,
+                                             Down))
         
-        init=get_id(self.mesh_3D.h,self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z,corners[0]) #ID of the lowest block
-        init_coords=self.mesh_3D.get_coords(init)
-        crds=init_coords.copy()
-        
-        end_1=get_id(self.mesh_3D.h,self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z,corners[1]) #ID of the upper corner
-        end_1_coords=self.mesh_3D.get_coords(end_1)
-        end_2=get_id(self.mesh_3D.h,self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z,corners[2]) #ID of the upper corner
-        end_2_coords=self.mesh_3D.get_coords(end_2)
-        
-        L1=end_1_coords-init
-        L2=end_2_coords-init
-        v=np.array([])
-        for i in range(int(end_2-init)):
-            for j in range(int(end_1-init)):
-                cr=init_coords+self.mesh_3D.h*i*tau_2+self.mesh_3D.h*j*tau_1
-                
-                crds=np.vstack((crds, cr))
-                
-                k=get_id(self.mesh_3D.h,self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z,cr) #Current block
-                
-                if np.any(self.mesh_3D.get_coords(k)-cr): print("ERORROOROROROROR")
-                
-                a,b,c,d,_,_=self.interpolate(cr)
-                
-                value=0
-                print(a)
-                value+=np.dot(self.q[d], c)
-                v=np.append(v, value)
-        return crds, v  
-    
-    def rec_along_mesh(self,axis, crds_along_axis, s_field, q, C_v_array):
-        """Outdated"""
-        
-        mesh=self.mesh_3D
-        net=self.mesh_1D
-        
-        if axis=="x":
-            array=mesh.get_x_slice(crds_along_axis)
-            cells=mesh.cells_z, mesh.cells_y
-            names="z","y"
-        elif axis=="y":
-            array=mesh.get_y_slice(crds_along_axis)
-            cells=mesh.cells_z, mesh.cells_x
-            names="z","x"
-        elif axis=="z":
-            array=mesh.get_z_slice(crds_along_axis)
-            cells=mesh.cells_y, mesh.cells_x
-            names="y","x"
-            
-            
-        sol=np.array([])
-        for k in array:
-            a,b,c,d,e,f=self.interpolate(mesh.get_coords(k))
-# =============================================================================
-#             if np.sum(d):
-#                 sol=np.append(sol,a.dot(s_field[b])+c.dot(q[d]))
-#             else:
-#                 sol=np.append(sol,a.dot(s_field[b]))
-# =============================================================================
-            #sol=np.append(sol,a.dot(s_field[b]))
-            
-            if np.sum(d):
-                sol=np.append(sol,c.dot(q[d]))
-                #if k not in get_neighbourhood(self.n, mesh.cells_x,mesh.cells_y,mesh.cells_z, net.s_blocks[0]): pdb.set_trace()
-            else:
-                sol=np.append(sol,0)
-        
-        return sol.reshape(cells), names
+        return Full_linear_matrix
     
 
-    
-  
-    def get_bound_status(self, coords):
+    def Solve_problem(self):
+        sol=dir_solve(self.Full_linear_matrix, -self.Full_ind_array)
+        self.s=sol[:self.mesh_3D.size_mesh]
+        self.q=sol[self.mesh_3D.size_mesh:-self.S]
+        self.Cv=sol[-self.S:]
+        return
+        
+    def GetBoundaryStatus(self, coords):
         """Take good care of never touching the boundary!!"""
-        bound_status=get_bound_status(coords, self.mesh_3D.h, self.mesh_3D.cells_x,self.mesh_3D.cells_y, self.mesh_3D.cells_z )
+        bound_status=GetBoundaryStatus(coords, self.mesh_3D.h, self.mesh_3D.cells_x,self.mesh_3D.cells_y, self.mesh_3D.cells_z )
         return bound_status
     
-    def get_point_value_post(self, coords, rec,k):
-        a,b,c,d,e,f=self.interpolate(coords)
+    def GetPointValuePost(self, coords, rec,k):
+        a,b,c,d,e,f=self.Interpolate(coords)
         rec[k]=a.dot(self.s[b])+c.dot(self.q[d])
         return 
     
-    def interpolate(self, x):
-        """Function just to call interpolate_optimized without having to list all the arguments"""
-        return interpolate_optimized(x, self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y,
-                              self.mesh_3D.cells_z, self.mesh_3D.h, self.get_bound_status(x), 
+    def Interpolate(self, x):
+        """Function just to call InterpolateFast without having to list all the arguments"""
+        return InterpolateFast(x, self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y,
+                              self.mesh_3D.cells_z, self.mesh_3D.h, self.GetBoundaryStatus(x), 
                               self.mesh_3D.pos_cells,self.mesh_1D.s_blocks, self.mesh_1D.source_edge,
                               self.mesh_1D.tau, self.mesh_1D.pos_s, self.mesh_1D.h, self.mesh_1D.R, self.D)
 
-@njit
-def get_bound_status(coords, h_3D, cells_x, cells_y, cells_z):
-    """I need this to be out of the class to be able to be called by the interpolate_phi_bar"""
-    bound_status=np.zeros(0, dtype=np.int64) #array that contains the boundaries that lie less than h/2 from the point
-    if int(coords[0]/(h_3D/2))==0: bound_status=np.append(bound_status, 5) #down
-    elif int(coords[0]/(h_3D/2))==2*cells_x-1: bound_status=np.append(bound_status, 4) #top
-    if int(coords[1]/(h_3D/2))==0: bound_status=np.append(bound_status, 3) #west
-    elif int(coords[1]/(h_3D/2))==2*cells_y-1: bound_status=np.append(bound_status, 2) #east
-    if int(coords[2]/(h_3D/2))==0: bound_status=np.append(bound_status, 1) #south
-    elif int(coords[2]/(h_3D/2))==2*cells_z-1: bound_status=np.append(bound_status, 0) #north
-    return bound_status
 
-spec = [
-    ('bound', int64[:]),               # a simple scalar field
-    ('coords', float64[:]),
-    ('ID', int64),        
-    ('BC_value', int64),        
-    ('kernel_q', float64[:]),        
-    ('kernel_C_v', float64[:]),        
-    ('kernel_s', float64[:]),        
-    ('col_s', int64[:]),
-    ('col_C_v', int64[:]),
-    ('col_q', int64[:]), 
-    ('weight', float64), 
-    ('neigh', int64[:]), 
-    ('block_3D', int64)]
-@jitclass(spec)
-class node(): 
-    def __init__(self, coords, local_ID):
-        self.bound=np.zeros(0, dtype=np.int64) #meant to store -1 if it is not a boundary node and
-                                #the number of the boundary if it is
-        self.coords=coords
-        self.ID=local_ID
-        
-        self.BC_value=0 #Variable of the independent term caused by the BC. Only not 0 when in a boundary
-        #The kernels to multiply the unknowns to obtain the value of the slow term at 
-        #the node 
-        self.kernel_q=np.zeros(0, dtype=np.float64)
-        self.kernel_C_v=np.zeros(0, dtype=np.float64)
-        self.kernel_s=np.zeros(0, dtype=np.float64)
-        #The kernels with the positions
-        self.col_s=np.zeros(0, dtype=np.int64)
-        self.col_C_v=np.zeros(0, dtype=np.int64)
-        self.col_q=np.zeros(0, dtype=np.int64)
-        
-    def multiply_by_value(self, value):
-        """This function is used when we need to multiply the value of the node 
-        but when working in kernel form """
-        self.weight=value
-        self.kernel_q*=value
-        self.kernel_C_v*=value
-        self.kernel_s*=value
-        return
-    
-    def kernels_append(self,arrays_to_append):
-        """Function that simplifies a lot the append process"""
-        
-        a,b,c,d,e,f=arrays_to_append
-        
-        self.kernel_s=np.concatenate((self.kernel_s,a))
-        self.col_s=np.concatenate((self.col_s, b))
-        self.kernel_q=np.concatenate((self.kernel_q, c))
-        self.col_q=np.concatenate((self.col_q, d))
-        self.kernel_C_v=np.concatenate((self.kernel_C_v, e))
-        self.col_C_v=np.concatenate((self.col_C_v, f))
-        return
-    
-@njit
-def interpolate_optimized(x, n, cells_x, cells_y, cells_z, h_3D, bound_status, pos_cells,s_blocks, source_edge, tau_array, pos_s, h_1D, R, D):
-    """returns the kernels to obtain an interpolation on the point x. 
-    In total it will be 6 kernels, 3 for columns and 3 with data for s, q, and
-    C_v respectively"""
-    if len(bound_status): #boundary interpolation
-        #if x[0]>1 and x[1]<0.5:pdb.set_trace()
-        nodes=List([node(x, 0)])
-        nodes[0].neigh=get_neighbourhood(n, cells_x, 
-                                         cells_y, 
-                                         cells_z, 
-                                         get_id(h_3D,cells_x, cells_y, cells_z,x))
-        nodes[0].block_3D=get_id(h_3D,cells_x, cells_y, cells_z,nodes[0].coords)
-# =============================================================================
-#         nodes[0].dual_neigh=nodes[0].neigh
-#         dual_neigh=nodes[0].dual_neigh
-# =============================================================================
-        dual_neigh=nodes[0].neigh
-        blocks=np.array([nodes[0].block_3D])
-        
-    else: #no boundary node (standard interpolation)
-        blocks=get_8_closest(h_3D,cells_x, cells_y, cells_z,x)
-        nodes=List([node(pos_cells[blocks[0]], 0)])
-        nodes[0].block_3D=get_id(h_3D,cells_x, cells_y, cells_z,nodes[0].coords)
-        nodes[0].neigh=get_neighbourhood(n, cells_x, 
-                                         cells_y, 
-                                         cells_z, 
-                                         blocks[0])
-        dual_neigh=nodes[0].neigh
-        
-        c=1
-        for i in blocks[1:]:
-            #Create node object
-            
-            nodes.append(node(pos_cells[i], c))
-            #Append the neighbourhood to the neigh object variable
-            nodes[c].neigh=get_neighbourhood(n, cells_x, 
-                                             cells_y, 
-                                             cells_z, 
-                                             i)
-            nodes[c].block_3D=get_id(h_3D,cells_x, cells_y, cells_z,nodes[c].coords)
-            dual_neigh=np.concatenate((dual_neigh, nodes[c].neigh))
-            c+=1
-    #if np.all(x==np.array([1.5, 4.5, 2.5])): pdb.set_trace()
-    kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=get_interp_kernel_optimized(x,List(nodes), np.unique(dual_neigh), n, cells_x,
-                                       cells_y, cells_z, h_3D, s_blocks, source_edge, tau_array, pos_s, h_1D, R, D, 
-                                       len(blocks))
-    return kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
-
-@njit
-def get_interp_kernel_optimized(x, nodes: types.ListType(node.class_type.instance_type), dual_neigh,n, cells_x, cells_y, cells_z, h_3D, s_blocks, source_edge, tau_array, pos_s, h_1D, R, D, count):
-    """For some reason, when the discretization size of the network is too small, 
-    this function provides artifacts. I have not solved this yet"""
-    #From the nodes coordinates, their neighbourhoods and their kernels we do the interpolation
-    #Therefore, the kernels represent the slow term, the corrected rapid term must be calculated
-    #INTERPOLATED PART:
-    kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=get_I_1_optimized(x,List(nodes), dual_neigh,D,h_3D,s_blocks, source_edge, tau_array, pos_s, h_1D, R, count)
-    #RAPID (NON INTERPOLATED) PART
-    q,sources=kernel_point_optimized(x, dual_neigh,s_blocks, source_edge, tau_array, pos_s, h_1D,R ,D)
-    kernel_q=np.concatenate((kernel_q, q))
-    #kernel_C_v=np.concatenate((kernel_C_v, C))
-    col_q=np.concatenate((col_q, sources))
-    #col_C_v=np.concatenate((col_C_v, sources))
-    
-    return kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
-
-
-
-@njit
-def kakota():
-    a=List([node(np.array([35.0,2,5]), 0)])
-    a.append(node(np.array([35.0,2,5]), 0))
-    return a
-@njit
-def get_I_1_optimized(x,nodes: types.ListType(node.class_type.instance_type), dual_neigh, D, h_3D, s_blocks, source_edge, tau_array, pos_s, h_1D, R, count):
-    """Returns the kernels of the already interpolated part, il reste juste ajouter
-    le term rapide corrigé
-        - x is the point where the concentration is interpolated"""
-    if len(nodes)==8:
-        weights=trilinear_interpolation(x, np.array([h_3D, h_3D, h_3D]))
-        kernel_q=np.zeros(0, dtype=np.float64)
-        kernel_C_v=np.zeros(0, dtype=np.float64)
-        kernel_s=np.zeros(0, dtype=np.float64)
-        #The kernels with the positions
-        col_s=np.zeros(0, dtype=np.int64)
-        col_C_v=np.zeros(0, dtype=np.int64)
-        col_q=np.zeros(0, dtype=np.int64)
-        for i in range(8): #Loop through each of the nodes
-           
-            uncommon=get_uncommon(dual_neigh, nodes[i].neigh) 
-            #The following variable will contain the data kernel for q, the data kernel
-            #for C_v and the col kernel i.e. the sources 
-            a=kernel_point_optimized(x, uncommon, s_blocks, source_edge, tau_array, pos_s, h_1D, R, D)
-            ######## Changed sign on a[0] 26 mars 18:08
-            #I think the negative sign arises from the fact that this is the corrected part of the rapid term so it needs to be subtracted
-            
-            nodes[i].kernel_q=np.concatenate((nodes[i].kernel_q, -a[0]))
-            #nodes[i].kernel_C_v=np.concatenate((nodes[i].kernel_C_v, a[1]))
-            
-            #nodes[i].col_q=np.concatenate((nodes[i].col_q, a[2]))
-            nodes[i].col_q=np.concatenate((nodes[i].col_q, a[1]))
-# =============================================================================
-#             if len(a[1]): 
-#                 nodes[i].col_C_v=np.concatenate((nodes[i].col_C_v, a[2]))
-# =============================================================================
-            
-            nodes[i].kernel_s=np.array([1], dtype=np.float64)
-            nodes[i].col_s=np.array([nodes[i].block_3D])
-            
-            #This operation is a bit redundant
-            nodes[i].multiply_by_value(weights[i])
-            kernel_q=np.concatenate((kernel_q, nodes[i].kernel_q))
-            kernel_C_v=np.concatenate((kernel_C_v, nodes[i].kernel_C_v))
-            kernel_s=np.concatenate((kernel_s, nodes[i].kernel_s))
-            
-            col_q=np.concatenate((col_q, nodes[i].col_q))
-            col_C_v=np.concatenate((col_C_v, nodes[i].col_C_v))
-            col_s=np.concatenate((col_s, nodes[i].col_s))
-            
-        
-    
-    else: #There are not 8 nodes cause it lies in the boundary so there is no interpolation
-        kernel_s=np.array([1], dtype=np.float64) 
-        col_s=np.array([nodes[0].block_3D], dtype=np.int64)
-        kernel_q=np.zeros(0, dtype=np.float64)
-        col_q=np.zeros(0, dtype=np.int64)
-        kernel_C_v=np.zeros(0, dtype=np.float64)
-        col_C_v=np.zeros(0, dtype=np.int64)
-    
-    return kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v
     
 
 
 @njit
-def get_interface_kernels_optimized(k,m,pos_k, pos_m,h_3D, n, cells_x, cells_y, cells_z,
+def GetInterfaceKernelsFast(k,m,pos_k, pos_m,h_3D, n, cells_x, cells_y, cells_z,
                                     s_blocks, tau, h_1D, pos_s, source_edge,D):
-    k_neigh=get_neighbourhood(n, cells_x, cells_y, cells_z, k)
-    m_neigh=get_neighbourhood(n, cells_x, cells_y, cells_z, m)
+    k_neigh=GetNeighbourhood(n, cells_x, cells_y, cells_z, k)
+    m_neigh=GetNeighbourhood(n, cells_x, cells_y, cells_z, m)
     
     normal=(pos_m-pos_k)/h_3D
     
@@ -702,8 +381,8 @@ def get_interface_kernels_optimized(k,m,pos_k, pos_m,h_3D, n, cells_x, cells_y, 
 # =============================================================================
     
     
-    sources_k_m=np.arange(len(s_blocks), dtype=np.int64)[in1D(s_blocks, get_uncommon(k_neigh, m_neigh))]
-    sources_m_k=np.arange(len(s_blocks), dtype=np.int64)[in1D(s_blocks, get_uncommon(m_neigh, k_neigh))]
+    sources_k_m=np.arange(len(s_blocks), dtype=np.int64)[in1D(s_blocks, GetUncommon(k_neigh, m_neigh))]
+    sources_m_k=np.arange(len(s_blocks), dtype=np.int64)[in1D(s_blocks, GetUncommon(m_neigh, k_neigh))]
     #sources=in1D(s_blocks, neighbourhood)
     r_k_m=np.zeros(len(sources_k_m), dtype=np.float64)
     r_m_k=np.zeros(len(sources_m_k), dtype=np.float64)
@@ -715,16 +394,16 @@ def get_interface_kernels_optimized(k,m,pos_k, pos_m,h_3D, n, cells_x, cells_y, 
     for i in sources_k_m:
         ed=source_edge[i]
         a,b= pos_s[i]-tau[ed]*h_1D[ed]/2, pos_s[i]+tau[ed]*h_1D[ed]/2
-        r_k_m[c]=Simpson_surface(a,b,'P', center,h_3D, normal,D)
-        grad_r_k_m[c]=Simpson_surface(a,b,'G', center,h_3D, normal,D)
+        r_k_m[c]=SimpsonSurface(a,b,'P', center,h_3D, normal,D)
+        grad_r_k_m[c]=SimpsonSurface(a,b,'G', center,h_3D, normal,D)
         c+=1
         
     c=0
     for i in sources_m_k:
         ed=source_edge[i]
         a,b= pos_s[i]-tau[ed]*h_1D[ed]/2, pos_s[i]+tau[ed]*h_1D[ed]/2
-        r_m_k[c]=Simpson_surface(a,b,'P', center,h_3D, normal,D)
-        grad_r_m_k[c]=Simpson_surface(a,b,'G', center,h_3D, normal,D)
+        r_m_k[c]=SimpsonSurface(a,b,'P', center,h_3D, normal,D)
+        grad_r_m_k[c]=SimpsonSurface(a,b,'G', center,h_3D, normal,D)
         c+=1
     
 
@@ -732,7 +411,7 @@ def get_interface_kernels_optimized(k,m,pos_k, pos_m,h_3D, n, cells_x, cells_y, 
 
 
 @njit
-def Assembly_B_arrays_optimized(nmb_ordered_connect_matrix, size_mesh, n,D,
+def AssemblyBArraysFast(nmb_ordered_connect_matrix, size_mesh, n,D,
                                 cells_x, cells_y, cells_z, pos_cells, h_3D, 
                                 s_blocks, tau, h_1D, pos_s, source_edge):
     
@@ -740,250 +419,39 @@ def Assembly_B_arrays_optimized(nmb_ordered_connect_matrix, size_mesh, n,D,
     B_row=np.zeros(0,dtype=np.int64)
     B_col=np.zeros(0,dtype=np.int64)
     for k in range(size_mesh):
+        print("Assembling B, FV cell: ", k)
         N_k=nmb_ordered_connect_matrix[k] #Set with all the neighbours
         
         for m in N_k:
-            sources_k_m, r_k_m, grad_r_k_m, sources_m_k, r_m_k, grad_r_m_k=get_interface_kernels_optimized(k,m,pos_cells[k], pos_cells[m],h_3D, n, cells_x, cells_y, cells_z,
+            sources_k_m, r_k_m, grad_r_k_m, sources_m_k, r_m_k, grad_r_m_k=GetInterfaceKernelsFast(k,m,pos_cells[k], pos_cells[m],h_3D, n, cells_x, cells_y, cells_z,
                                                 s_blocks, tau, h_1D, pos_s, source_edge,D )
             B_data=np.concatenate((B_data, -r_k_m-grad_r_k_m/2*h_3D, r_m_k+grad_r_m_k/2*h_3D))
             B_row=np.concatenate((B_row, k*np.ones(len(sources_k_m)+len(sources_m_k),dtype=np.int64)))
             B_col=np.concatenate((B_col, sources_k_m, sources_m_k))
 
     return B_data, B_row, B_col
-
-
-@njit
-def Assembly_B_arrays_optimized(nmb_ordered_connect_matrix, size_mesh, n,D,
-                                cells_x, cells_y, cells_z, pos_cells, h_3D, 
-                                s_blocks, tau, h_1D, pos_s, source_edge):
-    
-    B_data=np.zeros(0, dtype=np.float64)
-    B_row=np.zeros(0,dtype=np.int64)
-    B_col=np.zeros(0,dtype=np.int64)
-    for k in range(size_mesh):
-        N_k=nmb_ordered_connect_matrix[k] #Set with all the neighbours
-        print(k)
-        for m in N_k:
-            sources_k_m, r_k_m, grad_r_k_m, sources_m_k, r_m_k, grad_r_m_k=get_interface_kernels_optimized(k,m,pos_cells[k], pos_cells[m],h_3D, n, cells_x, cells_y, cells_z,
-                                                s_blocks, tau, h_1D, pos_s, source_edge,D )
-            B_data=np.concatenate((B_data, -r_k_m-grad_r_k_m/2*h_3D, r_m_k+grad_r_m_k/2*h_3D))
-            B_row=np.concatenate((B_row, k*np.ones(len(sources_k_m)+len(sources_m_k),dtype=np.int64)))
-            B_col=np.concatenate((B_col, sources_k_m, sources_m_k))
-
-    return B_data, B_row, B_col
-@njit
-def Interpolate_phi_bar_fast(n, cells_x, cells_y, cells_z, h_3D,  
-                             pos_cells,s_blocks, source_edge,tau_array, pos_s, h_1D, R, D):
-    """Perform the loop in C that loops over the whole network"""
-    kernel_s_array=np.zeros(0, dtype=np.float64)
-    kernel_q_array=np.zeros(0, dtype=np.float64)
-    kernel_C_array=np.zeros(0, dtype=np.float64)
-    
-    col_s_array=np.zeros(0, dtype=np.int64)
-    col_q_array=np.zeros(0, dtype=np.int64)
-    col_C_array=np.zeros(0, dtype=np.int64)
-    
-    row_s_array=np.zeros(0, dtype=np.int64)
-    row_q_array=np.zeros(0, dtype=np.int64)
-    row_C_array=np.zeros(0, dtype=np.int64)
-    
-    for j in range(len(s_blocks)):
-        kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=interpolate_optimized(pos_s[j], n, cells_x, cells_y,
-                              cells_z, h_3D, get_bound_status(pos_s[j],h_3D, cells_x, cells_y, cells_z), pos_cells,s_blocks, source_edge,
-                              tau_array, pos_s, h_1D, R, D)
-        
-        kernel_s_array=np.concatenate((kernel_s_array, kernel_s))
-        col_s_array=np.concatenate((col_s_array, col_s))
-        row_s_array=np.concatenate((row_s_array, np.zeros(len(col_s),dtype=np.int64)+j))
-        
-        kernel_q_array=np.concatenate((kernel_q_array, kernel_q))
-        col_q_array=np.concatenate((col_q_array, col_q))
-        row_q_array=np.concatenate((row_q_array, np.zeros(len(col_q),dtype=np.int64)+j))
-        
-        kernel_C_array=np.concatenate((kernel_C_array, kernel_C_v))
-        col_C_array=np.concatenate((col_C_array, col_C_v))
-        row_C_array=np.concatenate((row_C_array, np.zeros(len(col_C_v),dtype=np.int64)+j))
-        
-    return(kernel_s_array, row_s_array, col_s_array, 
-           kernel_q_array, row_q_array,col_q_array, 
-           kernel_C_array, row_C_array, col_C_array)
-@njit
-def Interpolate_phi_bar_fast_2(n, cells_x, cells_y, cells_z, h_3D, 
-                             pos_cells,s_blocks, source_edge,tau_array, pos_s, h_1D, R, D):
-    """Perform the loop in C that loops over the whole network"""
-    kernel_s_array=List()
-    kernel_q_array=List()
-    kernel_C_array=List()
-    
-    col_s_array=List()
-    col_q_array=List()
-    col_C_array=List()
-    
-    for j in range(len(s_blocks)):
-        kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=interpolate_optimized(pos_s[j], n, cells_x, cells_y,
-                              cells_z, h_3D, get_bound_status(pos_s[j],h_3D, cells_x, cells_y, cells_z), pos_cells,s_blocks, source_edge,
-                              tau_array, pos_s, h_1D, R, D)
-        
-        kernel_s_array.append(kernel_s)
-        col_s_array.append(col_s)
-                                   
-        
-        kernel_q_array.append(kernel_q)
-        col_q_array.append(col_q)
-        
-        kernel_C_array.append(kernel_C_v)
-        col_C_array.append(col_C_v)
-        
-    return(kernel_s_array, col_s_array, kernel_q_array, col_q_array, kernel_C_array, col_C_array)
-
-@njit
-def Interpolate_phi_bar_fast_3(n, cells_x, cells_y, cells_z, h_3D, 
-                             pos_cells,s_blocks, source_edge,tau_array, pos_s, h_1D, R, D, max_size):
-    """Perform the loop in C that loops over the whole network"""
-    kernel_s_array=np.empty(len(s_blocks)*8, dtype=np.float64)
-    kernel_q_array=np.empty(max_size*len(s_blocks), dtype=np.float64)
-    kernel_C_array=np.empty(max_size*len(s_blocks), dtype=np.float64)
-    
-    col_s_array=np.empty(len(s_blocks)*8, dtype=np.int64)
-    col_q_array=np.empty(len(s_blocks)*max_size, dtype=np.int64)
-    col_C_array=np.empty(len(s_blocks)*max_size, dtype=np.int64)
-    
-    c_s=0 #counter for s
-    c_q=0 #counter for q 
-    c_C=0 #counter for C
-    
-    kk=0
-    for j in range(len(s_blocks)):
-        kernel_s,col_s,kernel_q, col_q,kernel_C_v,  col_C_v=interpolate_optimized(pos_s[j], n, cells_x, cells_y,
-                              cells_z, h_3D, get_bound_status(pos_s[j],h_3D, cells_x, cells_y, cells_z), pos_cells,s_blocks, source_edge,
-                              tau_array, pos_s, h_1D, R, D)
-        
-        kernel_s_array[c_s:c_s+len(kernel_s)]=kernel_s
-        col_s_array[c_s:c_s+len(kernel_s)]=col_s
-        c_s+=len(kernel_s)                    
-        
-        kernel_q_array[c_q: c_q+len(kernel_q)]=kernel_q
-        col_q_array[c_q:c_q+len(kernel_q)]=col_q
-        c_q+=len(kernel_q)
-        
-        kernel_C_array[c_C:c_C+len(kernel_C_v)]=kernel_C_v
-        col_C_array[c_C:c_C+len(kernel_C_v)]=col_C_v
-        c_C+=len(kernel_C_v)
-        kk+=1
-    #Now we eliminate the left over space
-    kernel_s_array=kernel_s_array[:c_s]
-    col_s_array=col_s_array[:c_s]
-    
-    kernel_q_array=kernel_q_array[:c_q]
-    col_q_array=col_q_array[:c_q]
-    
-    kernel_C_array=kernel_C_array[:c_C]
-    col_C_array=col_C_array[:c_C]
-    
-    return(kernel_s_array, col_s_array, kernel_q_array, col_q_array, kernel_C_array, col_C_array)
 
                       
+       
 
-def interpolate_helper(args):
-    self, k = args
-    a,b,c,d,e,f = self.interpolate(k)
-    return a.dot(self.s[b]) + c.dot(self.q[d])        
-
-class visualization_3D():
-    def __init__(self,lim, res, prob, num_proc, vmax, *trans):
-        
-        self.vmax=vmax
-        self.vmin=0
-        self.lim=lim
-        self.res=res
-        a=(lim[1]-lim[0])*np.array([1,2,3])/4
-        LIM_1=[lim[0], lim[0], lim[1], lim[1]]
-        LIM_2=[lim[0], lim[1], lim[0], lim[1]]
-        
-        perp_x=np.zeros([3,4,3])
-        for i in range(3):
-            perp_x[i]=np.array([a[i]+np.zeros(4),LIM_1 , LIM_2]).T
-            
-        perp_y, perp_z=perp_x.copy(),perp_x.copy()
-        
-        perp_y[:,:,0]=perp_x[:,:,1]
-        perp_y[:,:,1]=perp_x[:,:,0]
-        
-        perp_z[:,:,0]=perp_x[:,:,2]
-        perp_z[:,:,2]=perp_x[:,:,0]
-        
-        if trans:
-            perp_x+=trans
-            perp_y+=trans
-            perp_z+=trans
-            
-            
-        data=np.empty([9, res, res])
-        for i in range(3):
-            for j in range(3):
-                #cor are the corners of a square 
-                if i==0: cor=perp_x
-                if i==1: cor=perp_y
-                if i==2: cor=perp_z
-                
-                a,b=prob.get_coord_reconst_chat(cor[j], res, num_processes=num_proc)
-                
-                data[i*3+j]=b.reshape(res, res)
-                
-        self.data=data
-        
-        self.perp_x=perp_x
-        self.perp_y=perp_y
-        self.perp_z=perp_z
-        
-        self.plot(data, lim)
-        
-        return
+@dask.delayed
+def PhiBarHelper(args):
+    block, lst=args
+    path,n, cells_x, cells_y, cells_z, h_3D,pos_cells,s_blocks, source_edge,tau, pos_s, h_1D, R, D,sources_per_block, quant_sources_per_block=lst
+    print("block", block)
+    kernel_s,row_s, col_s,kernel_q, row_q, col_q=InterpolatePhiBarBlock(block,n, cells_x, cells_y, cells_z, h_3D, 
+                                 pos_cells,s_blocks, source_edge,tau, pos_s, h_1D, R, D, 
+                                 sources_per_block, quant_sources_per_block)
     
-    def plot(self, data, lim):
-        
-        res=self.res
-        perp_x, perp_y, perp_z=self.perp_x, self.perp_y, self.perp_z
-        
-        # Create a figure with 3 rows and 3 columns
-        fig, axs = plt.subplots(nrows=3, ncols=3, figsize=(18,18))
-        
-        # Set the titles for each row of subplots
-        row_titles = ['X', 'Y', 'Z']
-        
-        # Set the titles for each individual subplot
-        subplot_titles = ['x={:.2f}'.format(perp_x[0,0,0]), 'x={:.2f}'.format(perp_x[1,0,0]), 'x={:.2f}'.format(perp_x[2,0,0]),
-                          'y={:.2f}'.format(perp_y[0,1,1]), 'y={:.2f}'.format(perp_y[1,1,1]), 'y={:.2f}'.format(perp_y[2,1,1]),
-                          'z={:.2f}'.format(perp_z[0,0,2]), 'z={:.2f}'.format(perp_z[1,0,2]), 'z={:.2f}'.format(perp_z[2,2,2])]
-        
-        
-        # Loop over each row of subplots
-        for i, ax_row in enumerate(axs):
-            # Set the title for this row of subplots
-            ax_row[0].set_title(row_titles[i], fontsize=16)
-            
-            # Loop over each subplot in this row
-            for j, ax in enumerate(ax_row):
-                # Plot some data in this subplot
-                x = [1, 2, 3]
-                y = [1, 4, 9]
-                                             
-                b=self.data[i*3+j]
-                
-                im=ax.imshow(b.reshape(res,res), origin='lower', vmax=self.vmax, vmin=self.vmin, extent=[lim[0], lim[1], lim[0], lim[1]])
-                # Set the title and y-axis label for this subplot
-                ax.set_title(subplot_titles[i*3 + j], fontsize=14)
-                if i==0: ax.set_ylabel('z'); ax.set_xlabel('y')
-                if i==1: ax.set_ylabel('z'); ax.set_xlabel('x')
-                if i==2: ax.set_ylabel('x'); ax.set_xlabel('y')
-                
-        # Set the x-axis label for the bottom row of subplots
-        #axs[-1, 0].set_xlabel('X-axis', fontsize=12)
-        
-        fig.subplots_adjust(right=0.8)
-        cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
-        fig.colorbar(im, cax=cbar_ax)
-        
-        # Show the plot
-        plt.show()
+    np.save(path + '/{}_kernel_s'.format(block), kernel_s)
+    np.save(path + '/{}_row_s'.format(block), row_s)
+    np.save(path + '/{}_col_s'.format(block), col_s)
+    
+    np.save(path + '/{}_kernel_q'.format(block), kernel_q)
+    np.save(path + '/{}_row_q'.format(block), row_q)
+    np.save(path + '/{}_col_q'.format(block), col_q)
+    
+    return 
+    #return kernel_s,row_s, col_s,kernel_q, row_q, col_q
+
     

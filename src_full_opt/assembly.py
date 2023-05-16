@@ -8,20 +8,20 @@ Created on Fri Jan 27 16:17:50 2023
 import numpy as np 
 import scipy as sp 
 import pdb
-from small_functions import append_sparse
+from small_functions import AppendSparse
 
 
-def Assembly_diffusion_3D_interior(mesh_object):
+def AssemblyDiffusion3DInterior(mesh_object):
     #arrays containing the non-zero entries of the matrix
     row_array=np.array([]) #Contains the row values of each entry
     col_array=np.array([]) #Contains the colume values of each entry
     data_array=np.array([]) #Contains the entry value
     
-    mesh_object.assemble_boundary_vectors()
+    mesh_object.AssemblyBoundaryVectors()
     
     for k in mesh_object.int: #Loop that goes through each non-boundary cell
         rows=np.zeros(7)+k
-        cols=mesh_object.get_diff_stencil(k)
+        cols=mesh_object.GetDiffStencil(k)
         data=np.array([-6,1,1,1,1,1,1])
         
         row_array=np.concatenate((row_array, rows))
@@ -44,14 +44,14 @@ def Assembly_diffusion_3D_interior(mesh_object):
         
         # =============================================================================
         #       We only multiply the non boundary part of the matrix by h because in the boundaries assembly we need to include the h due to the difference
-        #       between the Neumann and Dirichlet boundary conditions. In short Assembly_diffusion_3D_interior returns data that needs to be multiplied by h 
-        #       while Assembly_diffusion_3D_boundaries is already dimensionally consistent
+        #       between the Neumann and Dirichlet boundary conditions. In short AssemblyDiffusion3DInterior returns data that needs to be multiplied by h 
+        #       while AssemblyDiffusion3DBoundaries is already dimensionally consistent
         # =============================================================================
 
     return(np.array([row_array, col_array, data_array]))
 
         
-def Assembly_diffusion_3D_boundaries(mesh_object, BC_type, BC_value):
+def AssemblyDiffusion3DBoundaries(mesh_object, BC_type, BC_value):
     """For now, only a single value for the gradient or Dirichlet BC can be given
     and this function will transform the already assembled matrix to include the 
     boundary ocnditions"""
@@ -77,8 +77,8 @@ def Assembly_diffusion_3D_boundaries(mesh_object, BC_type, BC_value):
         
         # =============================================================================
         #       We only multiply the non boundary part of the matrix by h because in the boundaries assembly we need to include the h due to the difference
-        #       between the Neumann and Dirichlet boundary conditions. In short Assembly_diffusion_3D_interior returns data that needs to be multiplied by h 
-        #       while Assembly_diffusion_3D_boundaries is already dimensionally consistent
+        #       between the Neumann and Dirichlet boundary conditions. In short AssemblyDiffusion3DInterior returns data that needs to be multiplied by h 
+        #       while AssemblyDiffusion3DBoundaries is already dimensionally consistent
         # =============================================================================
     return(row_array, col_array, data_array, BC_array)      
 

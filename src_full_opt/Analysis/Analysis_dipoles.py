@@ -12,7 +12,7 @@ from Potentials_module import Classic, Alternatives
 os.chdir(path_src)
 
 import numpy as np
-from assembly import assemble_transport_1D
+from assembly import AssemblyTransport1D
 import matplotlib.pyplot as plt
 import scipy as sp
 import scipy.sparse.linalg
@@ -48,7 +48,7 @@ cells_1D = 20
 
 #%% - 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -59,12 +59,12 @@ import matplotlib.pyplot as plt
 import math
 
 from mesh_1D import mesh_1D
-from Green import get_source_potential
+from Green import GetSourcePotential
 import pdb
 
-from hybrid_set_up_noboundary import hybrid_set_up, visualization_3D
+from hybrid_set_up_noboundary import hybrid_set_up, Visualization3D
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 #%
 
 
@@ -77,7 +77,7 @@ n=20
 L=np.array([1,1,1])
 mesh=cart_mesh_3D(L,cells)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 
 #%%
@@ -92,13 +92,13 @@ h=np.array([L[0]])/cells_1D
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.pos_arrays(mesh)
+net.PositionalArrays(mesh)
 
 #%%
 prob=hybrid_set_up(mesh, net, BC_type, BC_value, n, 1, np.zeros(len(diameters))+K)
 
-mesh.get_ordered_connect_matrix()
-prob.Assembly_problem()
+mesh.GetOrderedConnectivityMatrix()
+prob.AssemblyProblem()
 
 
 
@@ -115,7 +115,7 @@ plt.show()
 
 #%%
 
-a=visualization_3D([0, L[0]], 51, prob, 12, 0.1)
+a=Visualization3D([0, L[0]], 51, prob, 12, 0.1)
 
 #%%
 

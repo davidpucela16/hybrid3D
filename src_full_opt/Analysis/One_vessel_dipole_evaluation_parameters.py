@@ -39,7 +39,7 @@ params = {'legend.fontsize': 'x-large',
 pylab.rcParams.update(params)
 
 
-from assembly import Assembly_diffusion_3D_interior, Assembly_diffusion_3D_boundaries
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
 from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
@@ -48,14 +48,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import math
-from assembly_1D import full_adv_diff_1D
+from assembly_1D import FullAdvectionDiffusion1D
 from mesh_1D import mesh_1D
-from Green import get_source_potential
+from Green import GetSourcePotential
 import pdb
 
-from hybrid_set_up_noboundary import hybrid_set_up, visualization_3D
+from hybrid_set_up_noboundary import hybrid_set_up, Visualization3D
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 import copy 
 
 
@@ -68,7 +68,7 @@ n=20
 L_3D=np.array([L_vessel, 3*L_vessel, L_vessel])
 mesh=cart_mesh_3D(L_3D,cells_3D)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 
 #%%
@@ -114,20 +114,20 @@ for alpha in np.array([10,20,50,100]):
             net_fine=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h_fine,1)
             net_fine.U=U
             net_fine.D=D
-            net_fine.pos_arrays(mesh)
+            net_fine.PositionalArrays(mesh)
             
             net_coarse=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h_coarse,1)
             net_coarse.U=U
             net_coarse.D=D
-            net_coarse.pos_arrays(mesh)
+            net_coarse.PositionalArrays(mesh)
             
             BCs_1D=np.array([[0,1],
                              [3,0]])
             
             prob_fine=hybrid_set_up(mesh, net_fine, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-            #mesh.get_ordered_connect_matrix()
+            #mesh.GetOrderedConnectivityMatrix()
             
-            prob_fine.Assembly_problem()
+            prob_fine.AssemblyProblem()
             prob_fine.Solve_problem()
             q_line_fine=prob_fine.q.copy()
             Cv_line_fine=prob_fine.Cv.copy()
@@ -150,7 +150,7 @@ for alpha in np.array([10,20,50,100]):
             
             prob_fine.E_matrix=E_matrix_cyl
             prob_fine.F_matrix=F_matrix_cyl
-            Exact_full_linear=prob_fine.reAssembly_matrices()
+            Exact_full_linear=prob_fine.ReAssemblyMatrices()
             
             sol_cyl=dir_solve(Exact_full_linear, -prob_fine.Full_ind_array)
             
@@ -169,7 +169,7 @@ for alpha in np.array([10,20,50,100]):
             #The factor 2*np.pi*R_vessel arises because we consider q as the total flux and not the point gradient of concentration
             
             prob_coarse=hybrid_set_up(mesh, net_coarse, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
-            prob_coarse.Assembly_problem()
+            prob_coarse.AssemblyProblem()
             prob_coarse.Solve_problem()
             q_line_coarse=prob_coarse.q.copy()
             Cv_line_coarse=prob_coarse.Cv.copy()
@@ -192,7 +192,7 @@ for alpha in np.array([10,20,50,100]):
             
             prob_coarse.E_matrix=E_matrix_cyl
             prob_coarse.F_matrix=F_matrix_cyl
-            Exact_full_linear=prob_coarse.reAssembly_matrices()
+            Exact_full_linear=prob_coarse.ReAssemblyMatrices()
             
             sol_cyl=dir_solve(Exact_full_linear, -prob_coarse.Full_ind_array)
             

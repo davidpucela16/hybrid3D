@@ -8,10 +8,10 @@ Created on Tue May  9 13:32:08 2023
 THIS FILE IS TO TEST THE MODIFICATIONS MADE WHEN MODIFYING THE STUFF FOR THE SECOND EQUATION:
     - CLASS NODE
     - GET_I_1
-    - self.interpolate
-    - mesh_1D.kernel_point
-    - mesh_3D.get_id
-    - mesh_3D.get_8_closest
+    - self.Interpolate
+    - mesh_1D.KernelPoint
+    - mesh_3D.GetID
+    - mesh_3D.Get8Closest
 """
 
 import os 
@@ -47,22 +47,22 @@ from scipy.sparse.linalg import bicg
 
 
 
-from hybrid_set_up_noboundary_optimized_sec_eq import hybrid_set_up as opt
+from hybrid_set_up_noboundaryFast_sec_eq import hybrid_set_up as opt
 
-from neighbourhood import get_neighbourhood, get_uncommon
+from neighbourhood import GetNeighbourhood, GetUncommon
 
 from mesh import cart_mesh_3D
-from mesh_1D import mesh_1D, kernel_point_optimized
-from hybrid_set_up_noboundary_optimized_sec_eq import get_interface_kernels_optimized, Assembly_B_arrays_optimized
+from mesh_1D import mesh_1D, KernelPointFast
+from hybrid_set_up_noboundaryFast_sec_eq import GetInterfaceKernelsFast, AssemblyBArraysFast
 from scipy.sparse import csc_matrix
 from numba.typed import List
 
 import importlib.machinery
-loader = importlib.machinery.SourceFileLoader('hybrid_set_up_noboundary_optimized', '../src_optimized/hybrid_set_up_noboundary_optimized.py')
+loader = importlib.machinery.SourceFileLoader('hybrid_set_up_noboundaryFast', '../srcFast/hybrid_set_up_noboundaryFast.py')
 module = loader.load_module()
 
 #%%
-from mesh_1D import kernel_point_optimized
+from mesh_1D import KernelPointFast
 BC_type=np.array(["Neumann", "Neumann", "Neumann","Neumann","Neumann","Neumann"])
 BC_type=np.array(["Dirichlet", "Dirichlet","Neumann","Neumann", "Dirichlet","Dirichlet"])
 BC_value=np.array([0,0,0,0,0,0])
@@ -72,7 +72,7 @@ n=2
 L_3D=np.array([L_vessel, 3*L_vessel, L_vessel])
 mesh=cart_mesh_3D(L_3D,cells_3D)
 
-mesh.assemble_boundary_vectors()
+mesh.AssemblyBoundaryVectors()
 
 
 # - This is the validation of the 1D transport eq without reaction
@@ -102,18 +102,18 @@ h=np.zeros(3)+L_vessel/cells_per_vessel
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.pos_arrays(mesh)
+net.PositionalArrays(mesh)
 
-from mesh_1D_original_kernel_point import mesh_1D
+from mesh_1D_original_KernelPoint import mesh_1D
 
 net_slow=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net_slow.U=U
 net_slow.D=D
-net_slow.pos_arrays(mesh)
+net_slow.PositionalArrays(mesh)
 
 BCs_1D=np.array([[0,1],
                  [3,0]])
-mesh.get_ordered_connect_matrix()
+mesh.GetOrderedConnectivityMatrix()
 nmb_ordered_connect_matrix=List(mesh.ordered_connect_matrix)
 prob_opt=opt(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
 prob_non_opt=non_opt(mesh, net_slow, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
@@ -123,17 +123,17 @@ x=np.array([L_vessel/2, L_vessel/2, L_vessel/2])
 
 #%%
 
-kernel_point_optimized( x, net.uni_s_blocks, net.s_blocks, net.source_edge, net.tau, net.pos_s, net.h, net.R,D)
+KernelPointFast( x, net.uni_s_blocks, net.s_blocks, net.source_edge, net.tau, net.pos_s, net.h, net.R,D)
 
 
 #%%
-net_slow.kernel_point(x, net.uni_s_blocks,'P',K, D)
+net_slow.KernelPoint(x, net.uni_s_blocks,'P',K, D)
 #%%
 import pstats
 import cProfile
 if __name__ == '__main__':
     # run the profiler on the code and save results to a file
-    cProfile.run('prob_opt.Assembly_B_optimized()', filename=path + '/profile_results.prof')
+    cProfile.run('prob_opt.Assembly_BFast()', filename=path + '/profile_results.prof')
 
 
 

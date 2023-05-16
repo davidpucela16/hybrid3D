@@ -12,11 +12,11 @@ from numba import njit
 import pdb
 from scipy.integrate import quad, dblquad
 
-from Green_optimized import Simpson_surface, get_grad_source_potential, get_source_potential
+from GreenFast import SimpsonSurface, GetGradSourcePotential, GetSourcePotential
 
 # =============================================================================
 # @njit
-# def get_source_potential(x, x_star, R, h, D):
+# def GetSourcePotential(x, x_star, R, h, D):
 #     # Convert input arrays to float arrays
 #     x = x.astype(np.float64)
 #     x_star = x_star.astype(np.float64)
@@ -24,7 +24,7 @@ from Green_optimized import Simpson_surface, get_grad_source_potential, get_sour
 #     return h*R**2/4/(4*np.pi*D*np.linalg.norm(x-x_star))
 # =============================================================================
 @njit
-def log_line(x,a,b):
+def LogLine(x,a,b):
     """Returns the average value of the integral without the coefficient i.e. to the result one would have to multiply
     by the surface of the open cylinder (2 \pi R_j L_j)/(4*pi*D) to obtain a proper single layer potential
     
@@ -109,26 +109,26 @@ def Integral_grad_potential_interface_square_prev(x_source, center_square,normal
 def unit_test_Simpson(h,D):
     
     arg=np.array([0,-0.2,0]),np.array([0,0.2,0]),0.1,D
-    a=Simpson_surface(arg, get_grad_source_potential, np.array([0,0,-h/2]),h, np.array([0,0,-1]), D)*h**2
+    a=SimpsonSurface(arg, GetGradSourcePotential, np.array([0,0,-h/2]),h, np.array([0,0,-1]), D)*h**2
     
-    b=grad_point((np.array([0,0,0]), np.array([0,h/2,0])))[1]*h**2*16/36
+    b=GradPoint((np.array([0,0,0]), np.array([0,h/2,0])))[1]*h**2*16/36
     
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
-    b+=grad_point((np.array([0,0,0]), np.array([0,h/2,-h/2])))[1]*h**2*4/36
-    b+=grad_point((np.array([0,0,0]), np.array([0,h/2,h/2])))[1]*h**2*4/36
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([0,h/2,-h/2])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([0,h/2,h/2])))[1]*h**2*4/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,0])))[1]*h**2*4/36
     
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,-h/2])))[1]*h**2/36
-    b+=grad_point((np.array([0,0,0]), np.array([-h/2,h/2,h/2])))[1]*h**2/36
-    b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,-h/2])))[1]*h**2/36
-    b+=grad_point((np.array([0,0,0]), np.array([h/2,h/2,h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,-h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([-h/2,h/2,h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([h/2,h/2,-h/2])))[1]*h**2/36
+    b+=GradPoint((np.array([0,0,0]), np.array([h/2,h/2,h/2])))[1]*h**2/36
     
     from scipy.integrate import dblquad
     def integrand(y, x):
         
         p_1=np.array([0,0,0])
         p_2=np.array([x,y,h/2])
-        r = np.dot(grad_point((p_2, p_1)), np.array([0,0,1]))
+        r = np.dot(GradPoint((p_2, p_1)), np.array([0,0,1]))
         return r / (4*np.pi*D)
     
     scp, _ = dblquad(integrand, -h/2,h/2 , -h/2,  h/2)
@@ -166,7 +166,7 @@ def another_unit_test_Simpson():
         for i in range(6):
             no=normal[i]
             center=no*h/2
-            integral+=Simpson_surface(arg, get_grad_source_potential, center, h, no, 1)*h**2/L
+            integral+=SimpsonSurface(arg, GetGradSourcePotential, center, h, no, 1)*h**2/L
         print("This must be 1 due to properties of delta", integral)
     print("We expect around a 20% error")
         
@@ -192,7 +192,7 @@ def unit_test_single_layer(h, a):
     arg=np.array([-0.1,0,0]),np.array([0.1,0,0]),1,1
     
     t[2]=time.time()
-    mine=Simpson_surface(arg, get_source_potential, np.array([0,0,a]), h, np.array([0,0,1]), 1)*h**2/np.linalg.norm(arg[1]-arg[0])
+    mine=SimpsonSurface(arg, GetSourcePotential, np.array([0,0,a]), h, np.array([0,0,1]), 1)*h**2/np.linalg.norm(arg[1]-arg[0])
     t[3]=time.time()
     fast=Integral_potential_interface_square(np.array([0,0,0], dtype=float),
                                             np.array([a,0,0], dtype=float),
@@ -223,7 +223,7 @@ p.strip_dirs().sort_stats('cumulative').print_stats(10)
 #%% - Validation gradient
 
 @njit
-def grad_point(x, x_j):
+def GradPoint(x, x_j):
     return -(x-x_j)/(np.linalg.norm(x-x_j)**3)
 def unit_test_gradient_any_point(x, center_square, normal_square, h_square,D):
     
@@ -234,13 +234,13 @@ def unit_test_gradient_any_point(x, center_square, normal_square, h_square,D):
     def integrand(y, x):
         p_1=np.array([0,0,0])
         p_2=center_square + x*tau_1 + y*tau_2
-        r = np.dot(grad_point(p_2, p_1), normal_square)
+        r = np.dot(GradPoint(p_2, p_1), normal_square)
         return r / (4*np.pi*D)
     scp, _ = dblquad(integrand, -h_square/2,h_square/2 , -h_square/2,  h_square/2)
     #The following is the exact result of the Simpson's integration done by hand (notebook)
     print("With scipy integration: ", scp)
     
-    print("Mid point rule", np.dot(grad_point(center_square, x), normal_square)*h_square**2)
+    print("Mid point rule", np.dot(GradPoint(center_square, x), normal_square)*h_square**2)
     return
 
 
@@ -251,7 +251,7 @@ import numba
 def try_code():
     b=[]
     for i in range(10**5):
-        b.append(log_line(np.array([0.1+i,0,0], dtype=np.float64),np.array([0,0,0], dtype=np.float64),np.array([0,0.1,0], dtype=np.float64)))
+        b.append(LogLine(np.array([0.1+i,0,0], dtype=np.float64),np.array([0,0,0], dtype=np.float64),np.array([0,0.1,0], dtype=np.float64)))
     return b
         
         #%%
@@ -259,14 +259,14 @@ def try_code():
 def my_func():
     my_list = []
     for i in range(10):
-        my_list.append(log_line(np.array([0.1+i,0,0], dtype=np.float64),np.array([0,0,0], dtype=np.float64),np.array([0,0.1,0], dtype=np.float64)))
+        my_list.append(LogLine(np.array([0.1+i,0,0], dtype=np.float64),np.array([0,0,0], dtype=np.float64),np.array([0,0.1,0], dtype=np.float64)))
     return np.array(my_list)
 
 
 
 #%%
 
-def get_neighbourhood(n, cells_x, cells_y, cells_z, block_ID):
+def GetNeighbourhood(n, cells_x, cells_y, cells_z, block_ID):
     """Will return the neighbourhood of a given block for a given n
     in a mesh made of square cells
 
@@ -299,7 +299,7 @@ def get_neighbourhood(n, cells_x, cells_y, cells_z, block_ID):
     # print("the neighbourhood", square)
     return np.ndarray.flatten(cube)
 @njit
-def get_neighbourhood_opt(n, cells_x, cells_y, cells_z, block_ID):
+def GetNeighbourhood_opt(n, cells_x, cells_y, cells_z, block_ID):
     """Will return the neighbourhood of a given block for a given n
     in a mesh made of square cells
 
@@ -343,7 +343,7 @@ def in1D(arr1, arr2):
     indices = np.searchsorted(arr2_sorted, arr1)
     return (arr2_sorted[indices] == arr1)
 @njit
-def kernel_integral_surface_optimized(s_blocks, tau, h_net, pos_s, source_edge, center, normal, neighbourhood, function, K, D, h):
+def KernelIntegralSurfaceFast(s_blocks, tau, h_net, pos_s, source_edge, center, normal, neighbourhood, function, K, D, h):
     """Returns the kernel that multiplied (scalar, dot) by the array of fluxes (q) returns
     the integral of the rapid term over the surface
     
@@ -359,7 +359,7 @@ def kernel_integral_surface_optimized(s_blocks, tau, h_net, pos_s, source_edge, 
     for i in sources:
         ed=source_edge[i]
         a,b= pos_s[i]-tau[ed]*h_net[ed]/2, pos_s[i]+tau[ed]*h_net[ed]/2
-        q_array[c]=Simpson_surface(a,b,function, center,h, normal,D)
+        q_array[c]=SimpsonSurface(a,b,function, center,h, normal,D)
         c+=1
     return q_array,  sources
 
