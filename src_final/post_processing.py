@@ -56,11 +56,7 @@ pylab.rcParams.update(params)
 
 import time
 
-#@dask.delayed
-def InterpolateHelper(args):
-    prob,coords=args
-    a,b,c,d = prob.Interpolate(coords)
-    return a.dot(prob.s[b]) + c.dot(prob.q[d]) 
+
 
 class Visualization3D():
     def __init__(self,lim, res, prob, num_proc, vmax, *trans):
@@ -104,7 +100,22 @@ class Visualization3D():
                 data[i*3+j]=b.reshape(res, res)
                 
         self.data=data
-        
+# =============================================================================
+#         arg=0
+#         for i in range(3):
+#             for j in range(3):
+#                 #cor are the corners of a square 
+#                 if i==0: cor=perp_x
+#                 if i==1: cor=perp_y
+#                 if i==2: cor=perp_z
+#                 
+#                 arg.append(self.getCoordReconstChat(cor[j], res, num_processes=num_proc))
+#                 a,b=self.getCoordReconstChat(cor[j], res, num_processes=num_proc)
+#                 
+#                 data[i*3+j]=b.reshape(res, res)
+#                 
+#         self.data=data
+# =============================================================================
         self.perp_x=perp_x
         self.perp_y=perp_y
         self.perp_z=perp_z
@@ -220,22 +231,81 @@ def get_coord_reconst_chat(prob, corners, resolution, num_processes=4):
         
         crds=np.vstack((crds, arr))
     
-    # =============================================================================
-    #         # Create a pool of worker processes
-    #         pool = Pool(processes=num_processes)
-    #         
-    #         # Use map function to apply interpolate_helper to each coordinate in parallel
-    #         results = pool.map(interpolate_helper, [(prob, k) for k in crds])
-    #         
-    #         # Close the pool to free up resources
-    #         pool.close()
-    #         pool.join()
-    #         
-    #         # Convert the results to a numpy array
-    #         rec = np.array(results)
-    # =============================================================================
-    rec=np.array([])        
-    for k in crds:
-        rec=np.append(rec, InterpolateHelper((prob, k)))
+    # Create a pool of worker processes
+    pool = Pool(processes=num_processes)
     
-    return crds, rec     
+    # Use map function to apply interpolate_helper to each coordinate in parallel
+    results = pool.map(InterpolateHelper, [(prob, k) for k in crds])
+    
+    # Close the pool to free up resources
+    pool.close()
+    pool.join()
+    
+    # Convert the results to a numpy array
+    rec = np.array(results)
+# =============================================================================
+#     rec=np.array([])        
+#     for k in crds:
+#         rec=np.append(rec, InterpolateHelper((prob, k)))
+# =============================================================================
+    
+    return crds, rec   
+
+@njit
+def ReconstructionCoordinatesFast(crds, n, cells_x, cells_y,cells_z, h_3D,pos_cells,s_blocks, source_edge,tau, pos_s, h_1D, R, D, s, q):
+    """This function is thought to estimate the concentration field at a given set of coordinates 
+    using parallel dask computation"""
+    print("executing")
+    phi=np.zeros(len(crds), dtype=np.float64)
+    e=0
+    
+    for i in crds:
+        a,b,c,d=InterpolateFast(i, n, cells_x, cells_y,
+                              cells_z, h_3D,GetBoundaryStatus(i,h_3D, cells_x, cells_y, cells_z), 
+                              pos_cells,s_blocks, source_edge,
+                              tau, pos_s, h_1D, R, D)
+        phi[e]=a.dot(s[b]) + c.dot(q[d]) 
+        e+=1
+    return phi
+
+@njit(parallel=True)
+def ReconstructionCoordinatesParallel(crds, n, cells_x, cells_y,cells_z, h_3D,pos_cells,s_blocks, source_edge,tau, pos_s, h_1D, R, D, s, q):
+    """This function is thought to estimate the concentration field at a given set of coordinates 
+    using parallel dask computation"""
+    print("executing")
+    phi=np.zeros(len(crds), dtype=np.float64)
+    e=0
+    
+    for j in prange(len(crds)):
+        i=crds[j]
+        a,b,c,d=InterpolateFast(i, n, cells_x, cells_y,
+                              cells_z, h_3D,GetBoundaryStatus(i,h_3D, cells_x, cells_y, cells_z), 
+                              pos_cells,s_blocks, source_edge,
+                              tau, pos_s, h_1D, R, D)
+        phi[j]=a.dot(s[b]) + c.dot(q[d]) 
+        e+=1
+    return phi
+
+
+# =============================================================================
+# def ReconstructionCoordinatesFast(crds, prob):
+#     """This function is thought to estimate the concentration field at a given set of coordinates 
+#     using parallel dask computation"""
+#     phi=[]
+#     c=0
+#     for i in crds:
+#         phi.append(InterpolateHelperDask((prob, i)))
+#         c+=1
+#     return dask.compute(phi)
+# =============================================================================
+
+def InterpolateHelper(args):
+    prob,coords=args
+    a,b,c,d = prob.Interpolate(coords)
+    return a.dot(prob.s[b]) + c.dot(prob.q[d]) 
+
+@dask.delayed
+def InterpolateHelperDask(args):
+    prob,coords=args
+    a,b,c,d = prob.Interpolate(coords)
+    return a.dot(prob.s[b]) + c.dot(prob.q[d]) 

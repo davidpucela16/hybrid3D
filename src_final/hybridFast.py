@@ -81,8 +81,9 @@ class hybrid_set_up():
         
         self.DetermineMaxSize()
         
-        self.B_assembly_bool=0 #True if the matrix has already been computed
-        self.phi_bar_bool=0 #True if the matrix has already been computed
+        self.B_assembly_bool=False #True if the matrix has already been computed
+        self.phi_bar_bool=False #True if the matrix has already been computed
+        self.I_assembly_bool=False
         
         return
     
@@ -109,7 +110,7 @@ class hybrid_set_up():
         else:
             print("loading matrix from: ", mat_path)
             B_matrix=sp.sparse.load_npz(mat_path + "/B_matrix.npz")
-        
+            print("Finished loading matrix")
         B_matrix=self.AssemblyBBoundaries(B_matrix)
         self.B_matrix=B_matrix
         
@@ -227,15 +228,18 @@ class hybrid_set_up():
         
         return sp.sparse.hstack((self.D_matrix_slow, self.E_matrix_slow, self.F_matrix_slow))
     
-    def AssemblyDEFFast(self, path_phi_bar):
+    def AssemblyDEFFast(self, path_phi_bar, mat_path):
         if self.phi_bar_bool:
-            self.phi_bar_s=sp.sparse.load_npz(path_phi_bar + '/phi_bar_s.npz')
-            self.Gij=sp.sparse.load_npz(path_phi_bar + '/phi_bar_q.npz')
-            
+            print("Began laoding phi_bar from ", mat_path)
+            self.phi_bar_s=sp.sparse.load_npz(mat_path + '/phi_bar_s.npz')
+            self.Gij=sp.sparse.load_npz(mat_path + '/phi_bar_q.npz')
+            print("Finished laoding phi_bar from ", mat_path)
         else:
+            if not os.path.exists(path_phi_bar):
+                os.mkdir(path_phi_bar)
             print("Calculating phi_bar")
             self.InterpolatePhiFullFast(path_phi_bar, 1)
-            self.phi_bar_s, self.Gij=RetrievePhiBar(path_phi_bar,self.S, self.mesh_3D.size_mesh, self.mesh_1D.uni_s_blocks)
+            self.phi_bar_s, self.Gij=RetrievePhiBar(mat_path, path_phi_bar,self.S, self.mesh_3D.size_mesh, self.mesh_1D.uni_s_blocks)
         self.D_matrix=self.phi_bar_s
         
         q_portion_diagonal=np.repeat(1/self.K, self.mesh_1D.cells) #q_j/K_j
@@ -244,7 +248,7 @@ class hybrid_set_up():
         self.Gij+=self.q_portion
         self.F_matrix=-sp.sparse.diags(np.ones(len(self.mesh_1D.s_blocks)))
         self.D_E_F_matrix=sp.sparse.hstack((self.Gij, self.F_matrix))
-        self.Gij=None
+        #self.Gij=None
         self.D_E_F_matrix=sp.sparse.hstack((self.D_matrix, self.D_E_F_matrix))
         
         return self.D_E_F_matrix
@@ -259,29 +263,31 @@ class hybrid_set_up():
         dask.compute(a)
         return 
     
-    def RetrievePhiBar(self, path):
-        kernel_q=np.zeros(0, dtype=np.float64)
-        kernel_s=np.zeros(0, dtype=np.float64)
-        #The kernels with the positions
-        col_s=np.zeros(0, dtype=np.int64)
-        col_q=np.zeros(0, dtype=np.int64)
-        
-        row_s=np.zeros(0, dtype=np.int64)
-        row_q=np.zeros(0, dtype=np.int64)
-        
-        for i in self.mesh_1D.uni_s_blocks:
-            kernel_s=np.concatenate((kernel_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
-            kernel_q=np.concatenate((kernel_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
-            col_s=np.concatenate((col_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
-            col_q=np.concatenate((col_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
-            row_s=np.concatenate((row_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
-            row_q=np.concatenate((row_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
-            
-            
-        return kernel_s,row_s, col_s,kernel_q, row_q, col_q
+# =============================================================================
+#     def RetrievePhiBar(self, path):
+#         kernel_q=np.zeros(0, dtype=np.float64)
+#         kernel_s=np.zeros(0, dtype=np.float64)
+#         #The kernels with the positions
+#         col_s=np.zeros(0, dtype=np.int64)
+#         col_q=np.zeros(0, dtype=np.int64)
+#         
+#         row_s=np.zeros(0, dtype=np.int64)
+#         row_q=np.zeros(0, dtype=np.int64)
+#         
+#         for i in self.mesh_1D.uni_s_blocks:
+#             kernel_s=np.concatenate((kernel_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
+#             kernel_q=np.concatenate((kernel_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
+#             col_s=np.concatenate((col_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
+#             col_q=np.concatenate((col_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
+#             row_s=np.concatenate((row_s, np.load(path + '/{}_kernel_s.npy'.format(i))))
+#             row_q=np.concatenate((row_q, np.load(path + '/{}_kernel_s.npy'.format(i))))
+#             
+#             
+#         return kernel_s,row_s, col_s,kernel_q, row_q, col_q
+# =============================================================================
 
-    def AssemblyGHI(self):
-        I_matrix=self.AssemblyI()
+    def AssemblyGHI(self, path_I):
+        I_matrix=self.AssemblyI(path_I)
         
         #WILL CHANGE WHEN CONSIDERING MORE THAN 1 VESSEL
         aux_arr=np.zeros(len(self.mesh_1D.pos_s))
@@ -301,31 +307,36 @@ class hybrid_set_up():
         
         return(self.G_H_I_matrix)
     
-    def AssemblyI(self):
+    def AssemblyI(self, path_I):
         """Models intravascular transport. Advection-diffusion equation
         
         FOR NOW IT ONLY HANDLES A SINGLE VESSEL"""
         
         D=self.mesh_1D.D
         U=self.mesh_1D.U
-        L=self.mesh_1D.L
-        aa, ind_array, DoF=FullAdvectionDiffusion1D(U, D, self.mesh_1D.h, self.mesh_1D.cells, self.mesh_1D.startVertex, self.mesh_1D.vertex_to_edge, self.R, self.BCs_1D)
-# =============================================================================
-#         aa, bb =AssemblyTransport1D(U, D, L[0]/len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s))
-#         self.III_ind_array = np.zeros(len(self.mesh_1D.pos_s))
-#         self.III_ind_array [0] = bb[0]
-# =============================================================================
-        self.III_ind_array=ind_array
-        I = csc_matrix((aa[0], (aa[1], aa[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
         
+        L=self.mesh_1D.L
+        
+        
+        if not self.I_assembly_bool:
+            aa, ind_array, DoF=FullAdvectionDiffusion1D(U, D, self.mesh_1D.h, self.mesh_1D.cells, self.mesh_1D.startVertex, self.mesh_1D.vertex_to_edge, self.R, self.BCs_1D)
+            self.III_ind_array=ind_array
+            I = csc_matrix((aa[0], (aa[1], aa[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
+            sp.sparse.save_npz(path_I + "/I_matrix", I)
+            np.save(path_I + "/III_ind_array", ind_array)
+        else:
+            print("Began laoding I and III_ind_array from ", path_I)
+            I=sp.sparse.load_npz(path_I + "/I_matrix.npz")
+            self.III_ind_array=np.load(path_I + "/III_ind_array.npy")
+            print("Finished laoding I and III_ind_array from ", path_I)
         self.I_matrix=I
         
         return I
     
-    def AssemblyProblem(self, mat_path,path_phi_bar):
-        Full_linear_matrix=sp.sparse.vstack((self.AssemblyABC(mat_path),
-                                             self.AssemblyDEFFast(path_phi_bar),
-                                             self.AssemblyGHI()))
+    def AssemblyProblem(self, path_matrices):
+        Full_linear_matrix=sp.sparse.vstack((self.AssemblyABC(path_matrices),
+                                             self.AssemblyDEFFast(path_matrices + "/E_portion", path_matrices),
+                                             self.AssemblyGHI(path_matrices)))
         self.Full_linear_matrix=Full_linear_matrix
         
         self.Full_ind_array=np.concatenate((self.I_ind_array, np.zeros(len(self.mesh_1D.pos_s)), self.III_ind_array))

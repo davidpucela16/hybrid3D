@@ -47,10 +47,11 @@ import matplotlib.pyplot as plt
 import math
 
 from mesh_1D import mesh_1D
-from Green import GetSourcePotential
+from GreenFast import GetSourcePotential
 import pdb
 
-from hybrid_set_up_noboundary import hybrid_set_up, Visualization3D
+from hybridFast import hybrid_set_up
+from post_processing import Visualization3D 
 
 from neighbourhood import GetNeighbourhood, GetUncommon
 
@@ -97,7 +98,7 @@ BCs_1D=np.array([[0,1],
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
 
 mesh.GetOrderedConnectivityMatrix()
-prob.AssemblyProblem()
+prob.AssemblyProblem(path + "/matrices")
 
 print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
 

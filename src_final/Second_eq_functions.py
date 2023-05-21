@@ -251,7 +251,7 @@ def InterpolatePhiBarBlock(block,n, cells_x, cells_y, cells_z, h_3D,
     return(kernel_s_array, row_s_array, col_s_array, 
            kernel_q_array, row_q_array,col_q_array)
 
-def RetrievePhiBar(mat_path, S, size_mesh, uni_s_blocks):
+def RetrievePhiBar(mat_path, phi_bar_path, S, size_mesh, uni_s_blocks):
     
     kernel_q=np.zeros(0, dtype=np.float64)
     kernel_s=np.zeros(0, dtype=np.float64)
@@ -271,7 +271,7 @@ def RetrievePhiBar(mat_path, S, size_mesh, uni_s_blocks):
         print("Retrieve block: ", i)
         c+=1
         print(c)
-        list_of_kernels=RetrieveBlockPhiBar(mat_path,i)
+        list_of_kernels=RetrieveBlockPhiBar(phi_bar_path,i)
         
         kernel_s=np.concatenate((kernel_s, list_of_kernels[0]))
         kernel_q=np.concatenate((kernel_q, list_of_kernels[3]))
@@ -299,8 +299,8 @@ def RetrievePhiBar(mat_path, S, size_mesh, uni_s_blocks):
             phi_bar_s+=sp.sparse.csc_matrix((kernel_s,(row_s, col_s)), shape=(S, size_mesh))
             phi_bar_q+=sp.sparse.csc_matrix((kernel_q,(row_q, col_q)), shape=(S, S))
             
-            sp.sparse.save_npz(mat_path + 'phi_bar_s', phi_bar_s)
-            sp.sparse.save_npz(mat_path + 'phi_bar_q', phi_bar_q)
+            sp.sparse.save_npz(mat_path + '/phi_bar_s', phi_bar_s)
+            sp.sparse.save_npz(mat_path + '/phi_bar_q', phi_bar_q)
             
     return phi_bar_s, phi_bar_q
    
