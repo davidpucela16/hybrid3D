@@ -5,20 +5,11 @@ Created on Sat Mar 18 18:47:23 2023
 
 @author: pdavid
 """
-import os 
-path=os.path.dirname(__file__)
-path_src=os.path.join(path, '../')
-os.chdir(path_src)
-
 import numpy as np
-from assembly_1D import FullAdvectionDiffusion1D
 import matplotlib.pyplot as plt
 import scipy as sp
-import scipy.sparse.linalg
 import math
-
 import pdb
-
 import matplotlib.pylab as pylab
 plt.style.use('default')
 params = {'legend.fontsize': 'x-large',
@@ -31,38 +22,33 @@ params = {'legend.fontsize': 'x-large',
          'lines.linewidth': 2,
          'lines.markersize': 15}
 pylab.rcParams.update(params)
-
-
-
-#%% - 
-
-from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
-from mesh import cart_mesh_3D
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import spsolve as dir_solve
 from scipy.sparse.linalg import bicg
-import numpy as np
-import matplotlib.pyplot as plt
 
-import math
+#Set up the correct path to import the source code
+import os 
+path=os.path.dirname(__file__)
+path_src=os.path.join(path, '../')
+os.chdir(path_src)
 
+from assembly_1D import FullAdvectionDiffusion1D
+from assembly import AssemblyDiffusion3DInterior, AssemblyDiffusion3DBoundaries
+from mesh import cart_mesh_3D
 from mesh_1D import mesh_1D
 from GreenFast import GetSourcePotential
-import pdb
-
 from hybridFast import hybrid_set_up
-from post_processing import Visualization3D 
-
+from post_processing import GetPlaneReconstructionFast, ReconstructionCoordinatesFast
 from neighbourhood import GetNeighbourhood, GetUncommon
 
 
-
+#%%
 BC_type=np.array(["Neumann", "Neumann", "Neumann","Neumann","Neumann","Neumann"])
-BC_type=np.array(["Dirichlet", "Dirichlet","Neumann","Neumann", "Dirichlet","Dirichlet"])
+#BC_type=np.array(["Dirichlet", "Dirichlet","Neumann","Neumann", "Dirichlet","Dirichlet"])
 BC_value=np.array([0,0,0,0,0,0])
 
-cells=5
-n=2
+cells=10
+n=3
 L=np.array([240,480,240])
 mesh=cart_mesh_3D(L,cells)
 
@@ -90,7 +76,7 @@ h=np.array([L_vessel])/cells_1D
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.PositionalArrays(mesh)
+net.PositionalArraysFast(mesh)
 
 BCs_1D=np.array([[0,1],
                  [1,0]])
@@ -98,6 +84,9 @@ BCs_1D=np.array([[0,1],
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
 
 mesh.GetOrderedConnectivityMatrix()
+prob.phi_bar_bool=False
+prob.B_assembly_bool=False
+prob.I_assembly_bool=False
 prob.AssemblyProblem(path + "/matrices")
 
 print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
@@ -107,11 +96,13 @@ print("If all BCs are newton the sum of all coefficients divided by the length o
 C_v_array=np.ones(len(net.pos_s)) #Though this neglects completely the contribution from the dipoles
 
 L1=sp.sparse.hstack((prob.A_matrix,prob.B_matrix))
-L2=sp.sparse.hstack((prob.D_matrix, prob.E_matrix))
+L2=sp.sparse.hstack((prob.D_matrix, prob.Gij+prob.q_portion))
 
 Li=sp.sparse.vstack((L1,L2))
 
-ind=np.concatenate((prob.I_ind_array, prob.F_matrix.dot(C_v_array)))
+M=0.00001
+
+ind=np.concatenate((prob.I_ind_array-M*mesh.h**3, prob.F_matrix.dot(C_v_array)))
 
 sol=dir_solve(Li, -ind)
 
@@ -123,36 +114,31 @@ plt.show()
 
 prob.s=sol[:-prob.S]
 prob.q=sol[-prob.S:]
+prob.Cv=C_v_array
+res=100
 
-res=50
-#lim=[mesh.h/2, L[0]-mesh.h/2]
-lim=[0,L[0]]
-mid=L[0]/2-mesh.h/2
+corners=np.array([[0,240,0], [0,240,240],[240,240,0], [240,240,240]])
+kk=GetPlaneReconstructionFast(240,1, 0, 2,  corners, res, prob)
+plt.imshow(kk[0])
+plt.colorbar()
+plt.show()
 
-
+#%%
+corners=np.array([[0,0,120], [0,480,120],[240,0,120], [240,480,120]])
+kk=GetPlaneReconstructionFast(240,2, 0, 1,  corners, res, prob)
+plt.imshow(kk[0], origin="lower", extent=[0,L[0],0,L[1]])
+plt.colorbar()
+plt.show()
+#%%
+corners=np.array([[120,0,0],[120,0,240],[120,480,0],[120,480,240]])
+kk=GetPlaneReconstructionFast(240,0, 1, 2,  corners, res, prob)
+plt.imshow(kk[0], origin="lower", extent=[0,L[1],0,L[2]])
+plt.colorbar()
+plt.show()
 
 #%%  - Validation with 2D code
 
-Lin_matrix=sp.sparse.hstack((prob.A_matrix, prob.B_matrix))
-Lin_matrix=sp.sparse.vstack((Lin_matrix, sp.sparse.hstack((prob.D_matrix, prob.E_matrix))))
 
-prob.C_v_array=np.ones(len(net.pos_s))
-
-
-
-sol=dir_solve(Lin_matrix, -np.concatenate((prob.I_ind_array, prob.F_matrix.dot(prob.C_v_array))))
-
-prob.s=sol[:prob.F]
-prob.q=sol[prob.F:]
-plt.plot(prob.q)
-
-#%%
-a=Visualization3D([0, L[0]], 50, prob, 12, 0.5)
-#%%
-plt.plot(a.data[5,25,:])
-#%%
-
-import matplotlib.pylab as pylab
 from hybrid2d.Reconstruction_functions import coarse_cell_center_rec
 from hybrid2d.Small_functions import get_MRE, plot_sketch
 from hybrid2d.Testing import (
@@ -164,16 +150,16 @@ from hybrid2d.Testing import (
 )
 
 from hybrid2d.Module_Coupling import assemble_SS_2D_FD
-
+from hybrid2d.Module_Coupling_sparse import non_linear_metab_sparse
+from hybrid2d.reconst_and_test_module import reconstruction_sans_flux
 # 0-Set up the sources
 # 1-Set up the domain
 
-Da_t = 10
 D = 1
 K0 = K
 L = 240
 
-cells = 5
+cells = 10
 h_coarse = L / cells
 
 # Definition of the Cartesian Grid
@@ -181,7 +167,7 @@ x_coarse = np.linspace(h_coarse / 2, L - h_coarse / 2, int(np.around(L / h_coars
 y_coarse = x_coarse
 
 # V-chapeau definition
-directness = 2
+directness = 3
 print("directness=", directness)
 
 S = 1
@@ -202,29 +188,61 @@ C_v_array = np.ones(S)
 # BC_type = np.array(["Periodic", "Periodic", "Neumann", "Dirichlet"])
 # =============================================================================
 BC_value = np.array([0, 0,0,0])
-BC_type = np.array(["Dirichlet", "Dirichlet", "Dirichlet", "Dirichlet"])
-
+#BC_type = np.array(["Dirichlet", "Dirichlet", "Dirichlet", "Dirichlet"])
+BC_type = np.array(["Neumann", "Neumann", "Neumann", "Neumann"])
 t = Testing(
     pos_s, Rv, cells, L, K_eff, D, directness, ratio, C_v_array, BC_type, BC_value
 )
+n = non_linear_metab_sparse(
+    pos_s,
+    Rv,
+    h_coarse,
+    L,
+    K_eff,
+    D,
+    directness,
+)
 
-s_Multi_cart_linear, q_Multi_linear = t.Multi()
+n.pos_arrays()  # Creates the arrays with the geometrical position of the sources
 
-Multi_rec_linear, _, _ = t.Reconstruct_Multi(0, 1)
 
-c = 0
-plt.plot(t.x_fine, t.array_phi_field_x_Multi[c], label="Multi")
-plt.xlabel("x")
-plt.legend()
-plt.title("linear 2D reference")
-plt.show()
+# Assembly of the Laplacian and other arrays for the linear system
+LIN_MAT = n.assembly_linear_problem_sparse(BC_type, BC_value)
+n.set_intravascular_terms(
+    C_v_array
+)  
+# Sets up the intravascular concentration as BC
+ind_array=n.H0.copy()
+ind_array[:cells**2]-=M*n.h**2
 
-plt.plot(t.y_fine, t.array_phi_field_y_Multi[c], label="Multi")
-plt.xlabel("y")
-plt.legend()
-plt.title("linear 2D reference")
-plt.show()
+sol = sp.sparse.linalg.spsolve(LIN_MAT, -ind_array)
+n.sol=sol
+s_FV = sol[: -n.S].reshape(len(n.x), len(n.y))
+q = sol[-n.S :]
 
+ratio=20
+a = reconstruction_sans_flux(sol, n, n.L, ratio, n.directness)
+a.reconstruction()
+a.reconstruction_boundaries_short(BC_type,BC_value)
+a.rec_corners()
+plt.imshow(a.rec_final, origin="lower", vmax=np.max(a.rec_final))
+plt.title("bilinear reconstruction \n coupling model Metabolism")
+plt.colorbar()
+# =============================================================================
+# c = 0
+# plt.plot(t.x_fine, t.array_phi_field_x_Multi[c], label="Multi")
+# plt.xlabel("x")
+# plt.legend()
+# plt.title("linear 2D reference")
+# plt.show()
+# 
+# plt.plot(t.y_fine, t.array_phi_field_y_Multi[c], label="Multi")
+# plt.xlabel("y")
+# plt.legend()
+# plt.title("linear 2D reference")
+# plt.show()
+# 
+# =============================================================================
     
 
 

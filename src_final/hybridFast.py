@@ -105,6 +105,7 @@ class hybrid_set_up():
         self.A_matrix=A_matrix
         if not self.B_assembly_bool:
             B_matrix=self.Assembly_BFast()
+            #Notice how the B matrix that we are saving does not have the boundaries included
             sp.sparse.save_npz(mat_path + "/B_matrix",B_matrix)
             
         else:
@@ -245,9 +246,9 @@ class hybrid_set_up():
         q_portion_diagonal=np.repeat(1/self.K, self.mesh_1D.cells) #q_j/K_j
         
         self.q_portion=sp.sparse.diags(q_portion_diagonal)
-        self.Gij+=self.q_portion
+        #self.Gij+=self.q_portion
         self.F_matrix=-sp.sparse.diags(np.ones(len(self.mesh_1D.s_blocks)))
-        self.D_E_F_matrix=sp.sparse.hstack((self.Gij, self.F_matrix))
+        self.D_E_F_matrix=sp.sparse.hstack((self.Gij+self.q_portion, self.F_matrix))
         #self.Gij=None
         self.D_E_F_matrix=sp.sparse.hstack((self.D_matrix, self.D_E_F_matrix))
         

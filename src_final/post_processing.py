@@ -309,3 +309,156 @@ def InterpolateHelperDask(args):
     prob,coords=args
     a,b,c,d = prob.Interpolate(coords)
     return a.dot(prob.s[b]) + c.dot(prob.q[d]) 
+
+
+
+#%% - The following functions are written more calmly and will probably substitute many of the functions above
+def GetPlaneReconstructionFast(plane_coord,plane_axis, i_axis, j_axis,corners, resolution, prob):
+    crds=GetCoordsPlane(corners, resolution)
+    mask=GetPlaneIntravascularComponent(plane_coord, prob.mesh_1D.pos_s, prob.mesh_1D.source_edge, 
+                                        plane_axis, i_axis, j_axis, corners, prob.mesh_1D.tau, 
+                                        resolution, prob.mesh_1D.R, prob.mesh_1D.h, prob.mesh_1D.cells)
+    intra=prob.Cv[mask-1]
+    result = np.where(mask == 0, np.nan, intra)
+    new_mask=mask > 0
+    
+    phi=ReconstructionCoordinatesFast(crds, prob.n, prob.mesh_3D.cells_x, prob.mesh_3D.cells_y,prob.mesh_3D.cells_z,
+                                         prob.mesh_3D.h,prob.mesh_3D.pos_cells,
+                                         prob.mesh_1D.s_blocks, prob.mesh_1D.source_edge,prob.mesh_1D.tau, prob.mesh_1D.pos_s, prob.mesh_1D.h, 
+                                         prob.R, 1, prob.s, prob.q)
+    phi_2=phi.reshape(resolution, resolution).copy()
+    plt.imshow(mask)
+    plt.show()
+    
+    plt.imshow(phi.reshape(resolution,resolution))
+    plt.show()
+    
+    plt.imshow(result)
+    plt.show()
+    
+    phi_final=phi.reshape(resolution,resolution)
+    phi_final[new_mask]=result[new_mask]
+    
+    return  phi_final,result,mask, phi_2
+
+def GetPlaneIntravascularComponent(plane_coord, pos_s, source_edge,
+                                   plane_axis, i_axis, j_axis, corners, 
+                                   tau_array, resolution,R, h_1D, cells_per_segment):
+    """This function aims to provide the voxels of the plane defined by plane_coord whose center fall
+    within a source cylinder. We work in 2D so it is not as confusing
+    1st - We figure out which sources intersect the plane 
+    2nd - Out of those possible sources, we loop through each of them to find which voxels fall within the cylinder
+    
+    plane_coord -> The coordinates of the plane on the axis perpendicular to itself
+    pos_s -> position of the sources
+    plane_axis -> 1, 2 or 3 for x, y or z
+    corners_plane -> self explanatory
+    tau_array -> the axial unitary vector for each source
+    i_axis -> axis that we want to be in the horizontal direction of the matrix
+    j_axis -> axis that we want to be in the vertical direction of the matrix
+    
+    Corners are given in the following order:
+        (0,0), (0,1), (1,0), (1,1)
+    where the first entry is the horizontal direction and the second is the vertical direction
+    according to the i_axis and j_axis"""
+    
+    #crds=GetCoordsPlane(corners, resolution)
+    #crds_plane=np.delete(crds, plane_axis, axis=1) #We eliminate the component perpendicular to the plane
+    
+    #First - Figure out the sources that intersect the plane
+    pos_s_plane=pos_s[:,plane_axis]
+    sources=np.where(np.abs(pos_s_plane - plane_coord) < np.repeat(h_1D, cells_per_segment)/2)[0]
+    
+    mask=np.zeros((resolution, resolution), dtype=np.int64)
+    
+    tau=np.linalg.norm((corners[2]-corners[0])/resolution)
+    h=np.linalg.norm((corners[1]-corners[0])/resolution)
+    
+    x=np.linspace(corners[0,i_axis]+tau/2, corners[2,i_axis]-tau/2, resolution)
+    y=np.linspace(corners[0,j_axis]+h/2, corners[1,j_axis]-h/2, resolution)
+    X,Y=np.meshgrid(x,y)
+    
+    for s in sources:
+# =============================================================================
+#         x_dist=X-pos_s[s,i_axis]
+#         y_dist=Y-pos_s[s,j_axis]
+#         
+#         a=(x_dist*tau_array[s,i_axis]**2+y_dist*tau_array[s,j_axis]**2 < h_1D[s]**2)
+#         b=(x_dist*tau_array[s,j_axis]**2+y_dist*tau_array[s,i_axis]**2 < R[s]**2)
+#         d=np.where(a & b)
+# =============================================================================
+        #The following 
+        P=np.zeros(list(X.shape) + [3])
+        P[:,:,i_axis]=X - pos_s[s,i_axis] #i_axis distance of every point of the grid to the center of the source s
+        P[:,:,j_axis]=Y - pos_s[s,j_axis] #j_axis distance of every point of the grid to the center of the source s
+        P[:,:, plane_axis]=np.zeros_like(X) #plane_axis distance of every point of the grid to the center of the source s
+        
+        #P = np.stack((X - pos_s[s,0], Y - pos_s[s,1], np.zeros_like(X)), axis=-1)
+        
+        # Project the position vectors onto the direction vector to get the scalar value t
+        v=tau_array[source_edge[s]]
+        t = np.sum(P *v, axis=-1)
+        
+        # Calculate the perpendicular distance of each point from the cylinder axis
+        d = np.linalg.norm(P - (t[:, :, np.newaxis] * v), axis=-1)
+        
+        # Find the indices of points that are within the cylinder
+        indices = np.where((d <= R[source_edge[s]]) & (np.abs(t) <= h_1D[source_edge[s]]/2))
+        mask[indices]=s+1
+    return mask
+
+
+def GetCoordsPlane(corners, resolution):
+    """We imagine the plane with a horizontal (x) and vertical direction (y).
+    Corners are given in the following order:
+        (0,0), (0,1), (1,0), (1,1)
+        
+        - tau indicates the discretization size in horizontal direction
+        - h indicates the discretization size in vertical direcion"""
+    crds=np.zeros((0,3))
+    tau=(corners[2]-corners[0])/resolution
+    
+    h=(corners[1]-corners[0])/resolution
+    L_h=np.linalg.norm((corners[1]-corners[0]))
+    
+    local_array= np.linspace(corners[0]+tau/2, corners[2]-tau/2 , resolution ) #along the horizontal direction
+    for j in range(resolution):
+        arr=local_array.copy()
+        arr[:,0]+=h[0]*(j+1/2)
+        arr[:,1]+=h[1]*(j+1/2)
+        arr[:,2]+=h[2]*(j+1/2)
+        
+        crds=np.vstack((crds, arr))
+    return(crds)
+
+
+# =============================================================================
+# def GetPlaneReconstructionParallel(plane_coord,plane_axis, i_axis, j_axis,corners, resolution, prob, property_array):
+#     crds=GetCoordsPlane(corners, resolution)
+#     mask=GetPlaneIntravascularComponent(plane_coord, prob.mesh_1D.pos_s, prob.mesh_1D.source_edge, 
+#                                         plane_axis, i_axis, j_axis, corners, prob.mesh_1D.tau, 
+#                                         resolution, prob.mesh_1D.R, prob.mesh_1D.h, prob.mesh_1D.cells)
+#     intra=property_array[mask-1]
+#     result = np.where(mask == 0, np.nan, intra)
+#     new_mask=mask > 0
+#     
+#     phi=ReconstructionCoordinatesParallel(crds, prob.n, prob.mesh_3D.cells_x, prob.mesh_3D.cells_y,prob.mesh_3D.cells_z,
+#                                          prob.mesh_3D.h,prob.mesh_3D.pos_cells,
+#                                          prob.mesh_1D.s_blocks, prob.mesh_1D.source_edge,prob.mesh_1D.tau, prob.mesh_1D.pos_s, prob.mesh_1D.h, 
+#                                          prob.R, 1, prob.s, prob.q)
+#     phi2=phi.copy()
+#     
+#     plt.imshow(phi.reshape(resolution,resolution), origin="lower")
+#     plt.show()
+#     
+#     plt.imshow(result, origin="lower")
+#     plt.show()
+#     
+#     phi_final=phi.reshape(resolution,resolution)
+#     phi_final[new_mask]=result[new_mask]
+#     
+#     return phi_final,result,phi2.reshape(resolution, resolution)
+# =============================================================================
+        
+        
+

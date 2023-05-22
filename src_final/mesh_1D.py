@@ -76,45 +76,47 @@ class mesh_1D():
         self.cells=self.cells.astype(int)
         self.h=h
         return h
-    def PositionalArrays(self, mesh_3D):
-        """This function is the pre processing step. It is meant to create the s_blocks
-        and uni_s_blocks arrays which will be used extensively throughout. s_blocks represents
-        the block where each source is located, uni_s_blocks contains all the source blocks
-        in a given order that will be respected throughout the resolution
-        
-            - h_cart is the size of the cartesian mesh
-            
-        THIS IS DEPRECATED, THE FASTER FUNCTION WITH @NJIT IS DEFINED BELOW
-        
-        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        SHOULD BE DELETED SOON
-        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""
-            
-        # pos_s will dictate the ID of the sources by the order they are kept in it!
-        print("THIS FUNCTION IS DEPRECATED!!")
-        
-        s_blocks = np.array([]).astype(int)
-        uni_s_blocks = np.array([], dtype=int)
-        self.a_array=np.zeros((0,3))
-        self.b_array=np.zeros((0,3))
-        for i in range(len(self.pos_s)):
-            ed=self.source_edge[i] #Current edge (int) the source lies on 
-            x_j=self.pos_s[i] #Center of the cylinder
-            u=np.array([x_j-self.tau[ed]*self.h[ed]/2 ,x_j+self.tau[ed]*self.h[ed]/2]) #a and b 
-            
-            self.a_array=np.vstack((self.a_array, u[0]))
-            self.b_array=np.vstack((self.b_array, u[1]))
-            
-            s_blocks=np.append(s_blocks, GetID(mesh_3D.h,mesh_3D.cells_x, mesh_3D.cells_y, mesh_3D.cells_z,x_j))
 # =============================================================================
-#             if s_blocks[-1] not in uni_s_blocks:
-#                 uni_s_blocks = np.append(uni_s_blocks, s_blocks[-1])
+#     def PositionalArrays(self, mesh_3D):
+#         """This function is the pre processing step. It is meant to create the s_blocks
+#         and uni_s_blocks arrays which will be used extensively throughout. s_blocks represents
+#         the block where each source is located, uni_s_blocks contains all the source blocks
+#         in a given order that will be respected throughout the resolution
+#         
+#             - h_cart is the size of the cartesian mesh
+#             
+#         THIS IS DEPRECATED, THE FASTER FUNCTION WITH @NJIT IS DEFINED BELOW
+#         
+#         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#         SHOULD BE DELETED SOON
+#         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""
+#             
+#         # pos_s will dictate the ID of the sources by the order they are kept in it!
+#         print("THIS FUNCTION IS DEPRECATED!!")
+#         
+#         s_blocks = np.array([]).astype(int)
+#         uni_s_blocks = np.array([], dtype=int)
+#         self.a_array=np.zeros((0,3))
+#         self.b_array=np.zeros((0,3))
+#         for i in range(len(self.pos_s)):
+#             ed=self.source_edge[i] #Current edge (int) the source lies on 
+#             x_j=self.pos_s[i] #Center of the cylinder
+#             u=np.array([x_j-self.tau[ed]*self.h[ed]/2 ,x_j+self.tau[ed]*self.h[ed]/2]) #a and b 
+#             
+#             self.a_array=np.vstack((self.a_array, u[0]))
+#             self.b_array=np.vstack((self.b_array, u[1]))
+#             
+#             s_blocks=np.append(s_blocks, GetID(mesh_3D.h,mesh_3D.cells_x, mesh_3D.cells_y, mesh_3D.cells_z,x_j))
+# # =============================================================================
+# #             if s_blocks[-1] not in uni_s_blocks:
+# #                 uni_s_blocks = np.append(uni_s_blocks, s_blocks[-1])
+# # =============================================================================
+#         self.s_blocks=s_blocks
+#         self.uni_s_blocks, self.counts = np.unique(s_blocks, return_counts=True)
+# 
+#         total_sb = len(uni_s_blocks)  # total amount of source blocks
+#         self.total_sb = total_sb
 # =============================================================================
-        self.s_blocks=s_blocks
-        self.uni_s_blocks, self.counts = np.unique(s_blocks, return_counts=True)
-
-        total_sb = len(uni_s_blocks)  # total amount of source blocks
-        self.total_sb = total_sb
         
     def PositionalArraysFast(self, mesh_3D):
         self.s_blocks, self.sources_per_block, self.quant_sources_per_block=PositionalArraysFast(self.source_edge, self.pos_s, self.tau, self.h, 
@@ -122,37 +124,39 @@ class mesh_1D():
         self.uni_s_blocks, self.counts = np.unique(self.s_blocks, return_counts=True)
         return 
     
-    def KernelPoint(self,x, neighbourhood, function, D):
-        #Maybe we should put this function independently so it can be jitted
-        """Returns the kernels to multiply the vectors of unknowns q and C_v
-        function K and D are useless"""
-        
-        sources=np.arange(len(self.s_blocks))[np.in1d(self.s_blocks, neighbourhood)]
-        q_array=np.array([])
-        
-        for i in sources:
-            ed=self.source_edge[i]
-            tau=self.tau[ed]
-            a,b= self.pos_s[i]-tau*self.h[ed]/2, self.pos_s[i]+tau*self.h[ed]/2
-            
-            dist_sq=self.R[ed]**2 if self.R[ed]<self.h[ed] else self.h[ed]**2/4+self.R[ed]**2
-            
-            #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-a, tau)**2<(self.h[ed]+self.R[ed])**2) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
-            #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-b, tau)>(self.R[ed])) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
-            if (np.sum((x-self.pos_s[i])**2) < dist_sq):
-                q=GetSelfInfluence(self.R[ed], self.h[ed], D)
-                
-            else:
-                q=GetSourcePotential(a,b,x,D)
-                ########################
-                #Coefficients due to geometry are already added!
-                ########################
-                #if q>1: pdb.set_trace()
-                
-            q_array=np.append(q_array, q)
-            
-        #Return q_kernel_data, C_v_kernel_data, the columns for both 
-        return q_array,  sources
+# =============================================================================
+#     def KernelPoint(self,x, neighbourhood, function, D):
+#         #Maybe we should put this function independently so it can be jitted
+#         """Returns the kernels to multiply the vectors of unknowns q and C_v
+#         function K and D are useless"""
+#         
+#         sources=np.arange(len(self.s_blocks))[np.in1d(self.s_blocks, neighbourhood)]
+#         q_array=np.array([])
+#         
+#         for i in sources:
+#             ed=self.source_edge[i]
+#             tau=self.tau[ed]
+#             a,b= self.pos_s[i]-tau*self.h[ed]/2, self.pos_s[i]+tau*self.h[ed]/2
+#             
+#             dist_sq=self.R[ed]**2 if self.R[ed]<self.h[ed] else self.h[ed]**2/4+self.R[ed]**2
+#             
+#             #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-a, tau)**2<(self.h[ed]+self.R[ed])**2) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
+#             #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-b, tau)>(self.R[ed])) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
+#             if (np.sum((x-self.pos_s[i])**2) < dist_sq):
+#                 q=GetSelfInfluence(self.R[ed], self.h[ed], D)
+#                 
+#             else:
+#                 q=GetSourcePotential(a,b,x,D)
+#                 ########################
+#                 #Coefficients due to geometry are already added!
+#                 ########################
+#                 #if q>1: pdb.set_trace()
+#                 
+#             q_array=np.append(q_array, q)
+#             
+#         #Return q_kernel_data, C_v_kernel_data, the columns for both 
+#         return q_array,  sources
+# =============================================================================
 
 @njit
 def KernelPointFast(x, neighbourhood, s_blocks, source_edge, tau_array, pos_s, h_1D, R,D):
