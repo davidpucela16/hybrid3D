@@ -326,14 +326,18 @@ def GetPlaneReconstructionFast(plane_coord,plane_axis, i_axis, j_axis,corners, r
                                          prob.mesh_3D.h,prob.mesh_3D.pos_cells,
                                          prob.mesh_1D.s_blocks, prob.mesh_1D.source_edge,prob.mesh_1D.tau, prob.mesh_1D.pos_s, prob.mesh_1D.h, 
                                          prob.R, 1, prob.s, prob.q)
-    phi_2=phi.reshape(resolution, resolution).copy()
-    plt.imshow(mask)
-    plt.show()
-    
-    plt.imshow(phi.reshape(resolution,resolution))
-    plt.show()
-    
-    plt.imshow(result)
+    phi_2=phi.reshape(resolution, resolution)
+# =============================================================================
+#     plt.imshow(mask)
+#     plt.show()
+#     
+#     plt.imshow(phi.reshape(resolution,resolution))
+#     plt.show()
+#     
+#     plt.imshow(result)
+#     plt.show()
+# =============================================================================
+    plt.imshow(phi_2)
     plt.show()
     
     phi_final=phi.reshape(resolution,resolution)

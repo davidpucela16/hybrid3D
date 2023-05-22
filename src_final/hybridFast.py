@@ -254,16 +254,24 @@ class hybrid_set_up():
         
         return self.D_E_F_matrix
         
+# =============================================================================
+#     def InterpolatePhiFullFast(self, path, num_processes):
+#         
+#         args=path,self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z, self.mesh_3D.h,self.mesh_3D.pos_cells,self.mesh_1D.s_blocks, self.mesh_1D.source_edge,self.mesh_1D.tau, self.mesh_1D.pos_s, self.mesh_1D.h, self.mesh_1D.R, self.D,self.mesh_1D.sources_per_block, self.mesh_1D.quant_sources_per_block
+#         a=[]
+#         for i in self.mesh_1D.uni_s_blocks:
+#             a.append(PhiBarHelper((i, args)))
+# 
+#         dask.compute(a)
+#         return 
+# =============================================================================
     def InterpolatePhiFullFast(self, path, num_processes):
         
         args=path,self.n, self.mesh_3D.cells_x, self.mesh_3D.cells_y, self.mesh_3D.cells_z, self.mesh_3D.h,self.mesh_3D.pos_cells,self.mesh_1D.s_blocks, self.mesh_1D.source_edge,self.mesh_1D.tau, self.mesh_1D.pos_s, self.mesh_1D.h, self.mesh_1D.R, self.D,self.mesh_1D.sources_per_block, self.mesh_1D.quant_sources_per_block
-        a=[]
         for i in self.mesh_1D.uni_s_blocks:
-            a.append(PhiBarHelper((i, args)))
+            PhiBarHelper((i, args))
 
-        dask.compute(a)
         return 
-    
 # =============================================================================
 #     def RetrievePhiBar(self, path):
 #         kernel_q=np.zeros(0, dtype=np.float64)
@@ -452,7 +460,7 @@ def AssemblyBArraysFast(nmb_ordered_connect_matrix, size_mesh, n,D,
                       
        
 
-@dask.delayed
+#@dask.delayed
 def PhiBarHelper(args):
     block, lst=args
     path,n, cells_x, cells_y, cells_z, h_3D,pos_cells,s_blocks, source_edge,tau, pos_s, h_1D, R, D,sources_per_block, quant_sources_per_block=lst

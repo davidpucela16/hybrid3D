@@ -148,12 +148,6 @@ def GetInterpolationKernelFast(x, nodes: types.ListType(node.class_type.instance
     return kernel_s,col_s,kernel_q, col_q
 
 
-
-@njit
-def kakota():
-    a=List([node(np.array([35.0,2,5]), 0)])
-    a.append(node(np.array([35.0,2,5]), 0))
-    return a
 @njit
 def GetI1Fast(x,nodes: types.ListType(node.class_type.instance_type), dual_neigh, D, h_3D, s_blocks, source_edge, tau_array, pos_s, h_1D, R):
     """Returns the kernels of the already Interpolated part, il reste juste ajouter

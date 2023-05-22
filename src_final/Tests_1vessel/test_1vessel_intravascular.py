@@ -123,10 +123,10 @@ import matplotlib.pyplot as plt
 import math
 
 from mesh_1D import mesh_1D
-from Green import GetSourcePotential
+from GreenFast import GetSourcePotential
 import pdb
 
-from hybrid_set_up_noboundary import hybrid_set_up
+from hybridFast import hybrid_set_up
 
 from neighbourhood import GetNeighbourhood, GetUncommon
 #%
@@ -150,17 +150,18 @@ startVertex=np.array([0])
 endVertex=np.array([1])
 pos_vertex=np.array([[L_3D[0]/2, 0.01, L_3D[0]/2],[L_3D[0]/2, L_3D[0]-0.01,L_3D[0]/2]])
 vertex_to_edge=[[0],[0]]
-diameters=np.array([2*R])
+diameters=2*R
 h=np.array([L_3D[0]])/cells_1D
 
 net=mesh_1D(startVertex, endVertex, vertex_to_edge ,pos_vertex, diameters, h,1)
 net.U=U
 net.D=D
-net.PositionalArrays(mesh)
+net.PositionalArraysFast(mesh)
 
 prob=hybrid_set_up(mesh, net, BC_type, BC_value, n, 1, np.zeros(len(diameters))+K, BCs)
 mesh.GetOrderedConnectivityMatrix()
-prob.AssemblyProblem()
+prob.B_assembly_bool=True
+prob.AssemblyProblem(os.path.join(path + '/matrices_intra'))
 
 
 #%% - Validation of the H, I, F matrices:
