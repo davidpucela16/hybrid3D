@@ -55,7 +55,7 @@ startVertex=np.array([0])
 endVertex=np.array([1])
 vertex_to_edge=np.array([[0],[0]])
 BCs=np.array([[0,1],
-              [1,0]])
+              [1,0.2]])
 
 aa, ind_array, DoF=FullAdvectionDiffusion1D(U, D, L/cells_1D, np.array([cells_1D]), startVertex, vertex_to_edge, R, BCs)
 
@@ -161,6 +161,8 @@ net.PositionalArraysFast(mesh)
 prob=hybrid_set_up(mesh, net, BC_type, BC_value, n, 1, np.zeros(len(diameters))+K, BCs)
 mesh.GetOrderedConnectivityMatrix()
 prob.B_assembly_bool=True
+
+prob.intra_exit_BC=None
 prob.AssemblyProblem(os.path.join(path + '/matrices_intra'))
 
 
@@ -198,3 +200,35 @@ plt.legend()
 plt.show()
 
 #End of the validation of the 1D transport model, that is G, H, I matrices
+
+#%% - Test with no diffusive flux at the end:
+prob.intra_exit_BC="zero_flux"
+prob.AssemblyI(os.path.join(path + '/matrices_intra'))
+I=prob.I_matrix
+sol = sp.sparse.linalg.spsolve(I, -prob.III_ind_array)
+
+plt.scatter(net.pos_s[:,1],sol, label='hybrid')
+plt.plot(s, analytical, label='analytical', linewidth=4)
+plt.legend()
+plt.show()
+
+#%% Advection - diffusion - reaction, weak couplings
+
+new_E=sp.sparse.identity(len(net.pos_s))/(K)
+H=prob.H_matrix
+
+F=prob.F_matrix
+ind=np.concatenate((np.zeros(len(net.pos_s)), prob.III_ind_array))
+
+L1=sp.sparse.hstack((new_E,F))
+L2=sp.sparse.hstack((H,I))
+
+Li=sp.sparse.vstack((L1,L2))
+
+sol=dir_solve(Li, -ind)
+
+
+plt.plot(net.pos_s[:,1],sol[cells_1D:], label='hybrid reaction')
+plt.plot(s, analytical_reac, label='analytical')
+plt.legend()
+plt.show()

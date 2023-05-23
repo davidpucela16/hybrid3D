@@ -88,9 +88,9 @@ def CheckLocalConservativenessVelocity(init, end, vertex_to_edge, flow_rate, R):
     
 
 
-def FullAdvectionDiffusion1D(U, D, h, cells, init, vertex_to_edge, R, BCs):
-    sparse_arrs=AssemblyTransport1DFast(U, D, h, cells)
-    sparse_arrs, ind_array, DoF_list=AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs)
+def FullAdvectionDiffusion1D(U, D, h, cells, init, vertex_to_edge, R, BCs, *zero_flux):
+    sparse_arrs=AssemblyTransport1DFast(U, D, h, cells )
+    sparse_arrs, ind_array, DoF_list=AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs,*zero_flux)
     
     return sparse_arrs, ind_array, DoF_list
 
@@ -126,33 +126,43 @@ def AssemblyTransport1DFast(U, D, h, cells):
     return data, row, col   
 
        
-def AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs):
+def AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs, *exit_BC):
     """This function assembles the 1D transport equation for the bifurcations"""
     #BCs is a two dimensional array where the first entry is the vertex and the second the value of the Dirichlet BC
     
     #We create here the independent array to store the BCs:
     ind_array=np.zeros(np.sum(cells))
     DoF_list=[] #List that stores the DoF that are in contact with this bifurcation
+    if exit_BC: exit_BC=exit_BC[0]
     vertex=0 #counter that indicates which vertex we are on
     for i in vertex_to_edge:
         if len(i)==1: #Boundary condition
             #Mount the boundary conditions here
             ed=i[0]
-        # =============================================================================
-        #     sparse_arrs=AppendSparse(sparse_arrs, np.array([-U/2-D/h,-U/2+3*D/h]), np.array([cells-1,cells-1]), np.array([cells-2,cells-1]))
-        #     final_value_Dirichlet=U-2*D/h
-        # =============================================================================
+            
+            
             if init[i]!=vertex: #Then it must be the end Vertex of the edge 
-                current_DoF=np.sum(cells[:ed])+cells[ed]-1 #End vertex 
-                kk=-1
+                if exit_BC=="zero_flux":
+                    current_DoF=np.sum(cells[:ed])+cells[ed]-1 #End vertex 
+                    kk=-1
+                    sparse_arrs=AppendSparse(sparse_arrs, np.array([-U[ed]-D/h[ed],U[ed]+D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF+kk,current_DoF]))
+                    print("no flux BC on intravascular")
+                else:
+                    current_DoF=np.sum(cells[:ed])+cells[ed]-1 #End vertex 
+                    kk=-1
+                    sparse_arrs=AppendSparse(sparse_arrs, np.array([-U[ed]-D/h[ed],U[ed]+3*D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF+kk,current_DoF]))
+                    value_Dirichlet=-2*D/h[ed]
+                    ind_array[current_DoF]=BCs[np.where(BCs[:,0]==vertex)[0][0],1]*value_Dirichlet #assigns the value of the BC multiplied by the factor 
+                   
             else: 
                 current_DoF=np.sum(cells[:ed]) #initial vertex
                 kk=1
             
-            sparse_arrs=AppendSparse(sparse_arrs, np.array([-U[ed]-D/h[ed],U[ed]+3*D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF+kk,current_DoF]))
-            value_Dirichlet=-2*D/h[ed]
-            ind_array[current_DoF]=BCs[np.where(BCs[:,0]==vertex)[0][0],1]*value_Dirichlet #assigns the value of the BC multiplied by the factor 
-            
+                sparse_arrs=AppendSparse(sparse_arrs, np.array([-U[ed]-D/h[ed],U[ed]+3*D/h[ed]]), np.array([current_DoF,current_DoF]), np.array([current_DoF+kk,current_DoF]))
+                value_Dirichlet=-2*D/h[ed]
+                ind_array[current_DoF]=BCs[np.where(BCs[:,0]==vertex)[0][0],1]*value_Dirichlet #assigns the value of the BC multiplied by the factor 
+                
+                
         else: #Bifurcation between two or three vessels (or apparently more)
             #pdb.set_trace()
             den=0
@@ -219,6 +229,8 @@ def AssemblyVertices(U, D, h, cells, sparse_arrs, vertex_to_edge, R, init, BCs):
         vertex+=1
         
     return sparse_arrs, ind_array, DoF_list
+
+
 
 #analytical=(np.exp(-Pe*x)-np.exp(-Pe))/(1-np.exp(-Pe))
 

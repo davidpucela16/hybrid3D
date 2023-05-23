@@ -170,12 +170,16 @@ def KernelPointFast(x, neighbourhood, s_blocks, source_edge, tau_array, pos_s, h
         ed=source_edge[i]
         tau=tau_array[ed]
         a,b=pos_s[i]-tau*h_1D[ed]/2, pos_s[i]+tau*h_1D[ed]/2
-        dist_sq=R[ed]**2 if R[ed]<h_1D[ed] else h_1D[ed]**2/4+R[ed]**2
         
+        projection=np.dot(x-a, tau)
+        closest_point = a + projection * tau
+        distance = np.linalg.norm(x - closest_point) #distance to centerline
+        #if x[2]>59 and x[0]>16 : pdb.set_trace()
         #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-a, tau)**2<(self.h[ed]+self.R[ed])**2) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
         #if (( np.dot(x-a, tau)>-self.R[ed] ) and ( np.dot(x-b, tau)>(self.R[ed])) and ( np.linalg.norm(np.cross(x-a, tau))<self.R[ed])):
         
-        if (np.sum((x-pos_s[i])**2) < dist_sq):
+        #if (np.sum((x-pos_s[i])**2) < dist_sq):
+        if distance < R[ed] and projection  < h_1D[ed]+R[ed] and projection>-R[ed]:
             q=GetSelfInfluence(R[ed], h_1D[ed], D)
             
         else:
@@ -189,6 +193,28 @@ def KernelPointFast(x, neighbourhood, s_blocks, source_edge, tau_array, pos_s, h
     #Return q_kernel_data, C_v_kernel_data, the columns for both 
     return q_array,  sources
     
+
+def is_point_inside_cylinder(point, start_point, end_point, radius):
+    # Calculate the direction vector of the cylinder
+    direction = end_point - start_point
+    
+    # Calculate the vector from the start point to the point of interest
+    point_vector = point - start_point
+    
+    # Calculate the projection of point_vector onto the direction vector
+    projection = np.dot(point_vector, direction) / np.dot(direction, direction)
+    
+    # Calculate the closest point on the centerline to the point of interest
+    closest_point = start_point + projection * direction
+    
+    # Calculate the distance between the closest point and the point of interest
+    distance = np.linalg.norm(point - closest_point)
+    
+    # Check if the distance is less than or equal to the radius
+    if distance <= radius:
+        return True
+    else:
+        return False
 # =============================================================================
 #     def KernelIntegralSurface(self, center,normal, neighbourhood,function, K,D,h):
 #         """Returns the kernel that multiplied (scalar, dot) by the array of fluxes (q) returns

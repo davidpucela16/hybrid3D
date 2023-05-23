@@ -85,6 +85,8 @@ class hybrid_set_up():
         self.phi_bar_bool=False #True if the matrix has already been computed
         self.I_assembly_bool=False
         
+        self.intra_exit_BC="zero_flux"
+        
         return
     
     def DetermineMaxSize(self):
@@ -328,7 +330,7 @@ class hybrid_set_up():
         
         
         if not self.I_assembly_bool:
-            aa, ind_array, DoF=FullAdvectionDiffusion1D(U, D, self.mesh_1D.h, self.mesh_1D.cells, self.mesh_1D.startVertex, self.mesh_1D.vertex_to_edge, self.R, self.BCs_1D)
+            aa, ind_array, DoF=FullAdvectionDiffusion1D(U, D, self.mesh_1D.h, self.mesh_1D.cells, self.mesh_1D.startVertex, self.mesh_1D.vertex_to_edge, self.R, self.BCs_1D, self.intra_exit_BC)
             self.III_ind_array=ind_array
             I = csc_matrix((aa[0], (aa[1], aa[2])), shape=(len(self.mesh_1D.pos_s), len(self.mesh_1D.pos_s)))
             sp.sparse.save_npz(path_I + "/I_matrix", I)

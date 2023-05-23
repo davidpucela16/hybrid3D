@@ -28,6 +28,8 @@ from hybridFast import hybrid_set_up
 from mesh import cart_mesh_3D
 from post_processing import Visualization3D
 from assembly_1D import AssembleVertexToEdge, PreProcessingNetwork, CheckLocalConservativenessFlowRate, CheckLocalConservativenessVelocity
+from PrePostTemp import SplitFile, SetArtificialBCs, ClassifyVertices, get_phi_bar, Get9Lines, VisualizationTool
+
 
 mat_path="/home/pdavid/Bureau/Code/hybrid3d/Synthetic_Network_2_x/F20"
 phi_bar_path=os.path.join(mat_path, "matrix_phi_bar")
@@ -36,55 +38,6 @@ filename=os.path.join(path_network,"Rea1_synthetic_x.Smt.SptGraph.am")
 
 
 
-def SplitFile(filename, output_dir_network):
-    with open(filename, 'r') as file:
-        output_files = []
-        current_output = None
-        line_counter = 0
-
-        for line in file:
-            line_counter += 1
-
-# =============================================================================
-#             if line_counter < 25:
-#                 continue
-# =============================================================================
-
-            if line.startswith('@'):
-                if current_output:
-                    current_output.close()
-                output_filename = f"output_{len(output_files)}.txt"
-                output_path = os.path.join(output_dir_network, output_filename)
-                current_output = open(output_path, 'w')
-                output_files.append(output_path)
-
-            if current_output:
-                current_output.write(line)
-
-        if current_output:
-            current_output.close()
-
-        return output_files
-
-
-
-def SetArtificialBCs(vertex_to_edge, entry_concentration, exit_concentration, init, end):
-    """Assembles the BCs_1D array with concentration=entry_concentration for the init vertices and 
-    concentration=exit_concentration for exiting vertices
-    
-    Remember to have preprocessed the init and end arrays for the velocity to always be positive"""
-    BCs_1D=np.zeros(2, dtype=np.int64)
-    c=0
-    for i in vertex_to_edge: #Loop over all the vertices
-    #i contains the edges the vertex c is in contact with
-        if len(i)==1:
-            vertex=i[0]
-            if np.in1d(i, init):
-                BCs_1D=np.vstack((BCs_1D, np.array([c, entry_concentration])))
-            else:
-                BCs_1D=np.vstack((BCs_1D, np.array([c, exit_concentration])))
-        c+=1
-    return(BCs_1D)
 
 #%%
 
@@ -212,26 +165,7 @@ for i in range(len(Flow_rate)):
     cumulative_flow+=Flow_rate[i]*net.tau[i]
     
     
-def ClassifyVertices(vertex_to_edge, init):
-    """Classifies each vertex as entering, exiting or bifurcation
-    The flow must have already been pre processed so it is always positive, and the direction is given 
-    by the edges array"""
-    #BCs is a two dimensional array where the first entry is the vertex and the second the value of the Dirichlet BC
-    entering=[]
-    exiting=[]
-    bifurcation=[]
-    vertex=0 #counter that indicates which vertex we are on
-    for i in vertex_to_edge:
-        if len(i)==1: #Boundary condition
-            #Mount the boundary conditions here
-            if init[i]!=vertex: #Then it must be the end Vertex of the edge 
-                exiting.append(vertex)
-            else: 
-                entering.append(vertex)
-        else: #Bifurcation between two or three vessels (or apparently more)
-            bifurcation.append(vertex)
-        vertex+=1
-    return entering, exiting, bifurcation
+
 
 #%%
 
@@ -291,12 +225,7 @@ if constant_concentration:
 
 #%%
 
-def get_phi_bar(phi_bar_path, s, q):
-    phi_bar_s=sp.sparse.load_npz( phi_bar_path + "/phi_bar_s.npz")
-    phi_bar_q=sp.sparse.load_npz( phi_bar_path + "/phi_bar_q.npz")
-    
-    phi_bar=phi_bar_s.dot(s)+phi_bar_q.dot(q)
-    return phi_bar
+
 
 phi_bar=get_phi_bar(mat_path, prob.s, prob.q)
 
@@ -304,39 +233,7 @@ phi_bar=get_phi_bar(mat_path, prob.s, prob.q)
 from post_processing import *
 
 
-def Get9Lines(ind_axis, resolution, L_3D, prob):
-    
-    #The other two axis are:
-    others=np.delete(np.array([0,1,2]), ind_axis)
-    
-    points_a=np.array([1/6,3/6,5/6])*L_3D[others[0]]
-    points_b=np.array([1/6,3/6,5/6])*L_3D[others[1]]
-    
-    crds=np.zeros([9,3,resolution])
-    
-    indep=np.linspace(0,L_3D[ind_axis], resolution)*0.98+L_3D[ind_axis]*0.01
-    
-    
-    for i in range(3):
-        for j in range(3):
-            a=np.zeros(resolution)+points_a[i]
-            b=np.zeros(resolution)+points_b[j]
-            
-            crds[j+3*i, ind_axis,:]=indep
-            crds[j+3*i, others[0],:]=a
-            crds[j+3*i, others[1],:]=b
-        
-    
-    phi = []
-    for i in range(9):
-        phi.append(ReconstructionCoordinatesFast(crds[i, :, :].T, n, prob.mesh_3D.cells_x, 
-                                                          prob.mesh_3D.cells_y,prob.mesh_3D.cells_z, prob.mesh_3D.h,
-                                                          prob.mesh_3D.pos_cells,prob.mesh_1D.s_blocks, 
-                                                          prob.mesh_1D.source_edge,prob.mesh_1D.tau, 
-                                                          prob.mesh_1D.pos_s, prob.mesh_1D.h, prob.mesh_1D.R, 
-                                                          1, prob.s, prob.q))
-    
-    return(phi,crds, others, points_a, points_b)
+
 
 phi,crds, others, points_a, points_b=Get9Lines(0, 200, L_3D, prob)
 for k in range(9):
@@ -404,39 +301,65 @@ resolution=100
 phi=[] #Will store the plane reconstruction variables 
 phi_extra=[]
 phi_1D_full=[]
+coordinates=[]
 for x in pos_array*L_3D[0]:
     corners=np.array([[x,5,5],[x,5,300],[x,300,5],[x,300,300]])
     phi_final,_,_, phi_2, crds=GetPlaneReconstructionFast(x, 0, 1,2,corners , resolution, prob, prob.Cv)
-    cords_1D=crds.reshape(resolution, resolution)[np.array(pos_array*resolution,dtype=np.int32)]
+    crds_1D=crds.reshape(resolution, resolution,3)[np.array(pos_array*resolution,dtype=np.int32)]
     phi_1D=[]
-    for i in range(len(pos_arrays)):
+    for i in range(len(pos_array)):
         phi_1D.append(ReconstructionCoordinatesFast(crds_1D[i], prob.n, prob.mesh_3D.cells_x, prob.mesh_3D.cells_y,prob.mesh_3D.cells_z, 
                                                     prob.mesh_3D.h,prob.mesh_3D.pos_cells,prob.mesh_1D.s_blocks, 
                                                     prob.mesh_1D.source_edge,prob.mesh_1D.tau, prob.mesh_1D.pos_s, prob.mesh_1D.h, 
                                                     prob.R, 1, prob.s, prob.q))
-    phi_1D_full.append(phi_1D)
+    phi_1D_full.append(np.array(phi_1D))
     phi_extra.append(phi_2)
     phi.append(phi_final)
+    coordinates.append(crds_1D)
     
 #%%
 
 # Generate example matrices
 # Define the minimum and maximum values for the color scale
-vmin = np.min([phi3[0][3],phi3[1][3],phi3[2][3],phi3[3][3]])
-vmax = np.max([phi3[0][3],phi3[1][3],phi3[2][3],phi3[3][3]])
+vmin = np.min([phi_extra[0],phi_extra[1],phi_extra[2],phi_extra[3]])
+vmax = np.max([phi_extra[0],phi_extra[1],phi_extra[2],phi_extra[3]])
 
 # Plot the matrices using imshow
-fig, axs = plt.subplots(2, 4, figsize=(15, 12))
-im1 = axs[0, 0].imshow(phi3[0][0], cmap='bwr', vmin=vmin, vmax=vmax)
-im2 = axs[0, 2].imshow(phi3[1][0], cmap='bwr', vmin=vmin, vmax=vmax)
-im3 = axs[1, 0].imshow(phi3[2][0], cmap='bwr', vmin=vmin, vmax=vmax)
-im4 = axs[1, 2].imshow(phi3[3][0], cmap='bwr', vmin=vmin, vmax=vmax)
+fig, axs = plt.subplots(2, 4, figsize=(30,16))
+im1 = axs[0, 0].imshow(phi[0], cmap='bwr', vmin=vmin, vmax=vmax)
+axs[0, 0].set_xlabel("y")
+axs[0, 0].set_ylabel("z")
+axs[0, 1].plot(coordinates[0][0,:,1],phi_1D_full[0].T)
+axs[0, 1].set_xlabel("y")
+
+im2 = axs[0, 2].imshow(phi[1], cmap='bwr', vmin=vmin, vmax=vmax)
+axs[0,2].set_xlabel("y")
+axs[0, 2].set_ylabel("z")
+axs[0, 3].plot(coordinates[1][0,:,1],phi_1D_full[1].T)
+axs[0, 3].set_xlabel("y")
+
+im3 = axs[1, 0].imshow(phi[2], cmap='bwr', vmin=vmin, vmax=vmax)
+axs[1, 0].set_xlabel("y")
+axs[1, 0].set_ylabel("z")
+axs[1, 1].plot(coordinates[0][0,:,1],phi_1D_full[2].T)
+axs[1, 1].set_xlabel("y")
+
+
+im4 = axs[1, 2].imshow(phi[3], cmap='bwr', vmin=vmin, vmax=vmax)
+axs[1, 2].set_xlabel("y")
+axs[1, 2].set_ylabel("z")
+axs[1, 3].plot(coordinates[0][0,:,1],phi_1D_full[3].T)
+axs[1,3].set_xlabel("y")
 
 # Set titles for the subplots
-axs[0, 0].set_title('Matrix 1')
-axs[0, 1].set_title('Matrix 2')
-axs[1, 0].set_title('Matrix 3')
-axs[1, 1].set_title('Matrix 4')
+axs[0, 0].set_title('x={:.1f}'.format(pos_array[0]*L_3D[0]))
+axs[0, 1].set_title('x={:.1f}'.format(pos_array[0]*L_3D[0]))
+axs[0, 2].set_title('x={:.1f}'.format(pos_array[1]*L_3D[0]))
+axs[0, 3].set_title('x={:.1f}'.format(pos_array[1]*L_3D[0]))
+axs[1, 0].set_title('x={:.1f}'.format(pos_array[2]*L_3D[0]))
+axs[1, 1].set_title('x={:.1f}'.format(pos_array[2]*L_3D[0]))
+axs[1, 2].set_title('x={:.1f}'.format(pos_array[3]*L_3D[0]))
+axs[1, 3].set_title('x={:.1f}'.format(pos_array[3]*L_3D[0]))
 
 # Adjust spacing between subplots
 fig.tight_layout()
@@ -444,11 +367,31 @@ fig.tight_layout()
 # Move the colorbar to the right of the subplots
 cbar = fig.colorbar(im1, ax=axs, orientation='vertical', shrink=0.8)
 cbar_ax = cbar.ax
-cbar_ax.set_position([0.92, 0.15, 0.03, 0.7])  # Adjust the position as needed
+cbar_ax.set_position([0.83, 0.15, 0.03, 0.7])  # Adjust the position as needed
 
 # Show the plot
 plt.show()
 
+
+res=100
+aax=VisualizationTool(prob, 0,1,2, np.array([[10,10],[10,295],[295,10],[295,295]]), res)
+aax.GetPlaneData()
+
+aay=VisualizationTool(prob, 1,0,2, np.array([[10,10],[10,295],[295,10],[295,295]]), res)
+aay.GetPlaneData()
+
+aaz=VisualizationTool(prob, 2,0,1, np.array([[10,10],[10,295],[295,10],[295,295]]), res)
+aaz.GetPlaneData()
+#%%
+aax2=VisualizationTool(prob, 0,2,1, np.array([[10,10],[10,295],[295,10],[295,295]]), res)
+aax2.GetPlaneData()
+
+#%%
+aax.PlotData()
+aay.PlotData()
+aaz.PlotData()
+#%%
+aax2.PlotData()
 #%%
 
 full=[]

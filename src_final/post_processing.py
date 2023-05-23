@@ -313,20 +313,19 @@ def InterpolateHelperDask(args):
 
 
 #%% - The following functions are written more calmly and will probably substitute many of the functions above
-def GetPlaneReconstructionFast(plane_coord,plane_axis, i_axis, j_axis,corners, resolution, prob):
+def GetPlaneReconstructionFast(plane_coord,plane_axis, i_axis, j_axis,corners, resolution, prob, property_array):
     crds=GetCoordsPlane(corners, resolution)
     mask=GetPlaneIntravascularComponent(plane_coord, prob.mesh_1D.pos_s, prob.mesh_1D.source_edge, 
                                         plane_axis, i_axis, j_axis, corners, prob.mesh_1D.tau, 
                                         resolution, prob.mesh_1D.R, prob.mesh_1D.h, prob.mesh_1D.cells)
-    intra=prob.Cv[mask-1]
+    intra=property_array[mask-1]
     result = np.where(mask == 0, np.nan, intra)
     new_mask=mask > 0
-    
     phi=ReconstructionCoordinatesFast(crds, prob.n, prob.mesh_3D.cells_x, prob.mesh_3D.cells_y,prob.mesh_3D.cells_z,
                                          prob.mesh_3D.h,prob.mesh_3D.pos_cells,
                                          prob.mesh_1D.s_blocks, prob.mesh_1D.source_edge,prob.mesh_1D.tau, prob.mesh_1D.pos_s, prob.mesh_1D.h, 
                                          prob.R, 1, prob.s, prob.q)
-    phi_2=phi.reshape(resolution, resolution)
+    phi_2=phi.reshape(resolution, resolution).copy()
 # =============================================================================
 #     plt.imshow(mask)
 #     plt.show()
@@ -337,13 +336,17 @@ def GetPlaneReconstructionFast(plane_coord,plane_axis, i_axis, j_axis,corners, r
 #     plt.imshow(result)
 #     plt.show()
 # =============================================================================
-    plt.imshow(phi_2)
+    plt.imshow(phi_2, origin="lower", extent=[0,prob.mesh_3D.L[i_axis],0,prob.mesh_3D.L[j_axis]])
+    plt.xlabel(np.array(["x","y","z"])[i_axis])
+    plt.ylabel(np.array(["x","y","z"])[j_axis])
+    plt.title("Extravascular $\phi$; "+ np.array(["x","y","z"])[plane_axis] + '={:.1f}'.format(plane_coord))
+    plt.colorbar()
     plt.show()
     
     phi_final=phi.reshape(resolution,resolution)
     phi_final[new_mask]=result[new_mask]
     
-    return  phi_final,result,mask, phi_2
+    return  phi_final,result,mask, phi_2, crds
 
 def GetPlaneIntravascularComponent(plane_coord, pos_s, source_edge,
                                    plane_axis, i_axis, j_axis, corners, 

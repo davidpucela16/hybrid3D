@@ -69,7 +69,7 @@ cells_1D = np.array([40])
 
 startVertex=np.array([0])
 endVertex=np.array([1])
-pos_vertex=np.array([[0.1,L[0]/2,  L[0]/2],[L_vessel-0.1, L[0]/2, L[0]/2]])
+pos_vertex=np.array([[0.1,L[0]/2,  L[0]/8],[L_vessel-0.1, L[0]/2, L[0]/8]])
 vertex_to_edge=[[0],[0]]
 diameters=np.array([2*R])
 h=np.array([L_vessel])/cells_1D
@@ -85,9 +85,9 @@ BCs_1D=np.array([[0,1],
 prob=hybrid_set_up(mesh, net, BC_type, BC_value,n,1, np.zeros(len(diameters))+K, BCs_1D)
 #%%
 mesh.GetOrderedConnectivityMatrix()
-prob.phi_bar_bool=False
-prob.B_assembly_bool=False
-prob.I_assembly_bool=False
+prob.phi_bar_bool=True
+prob.B_assembly_bool=True
+prob.I_assembly_bool=True
 prob.AssemblyProblem(path + "/matrices")
 
 print("If all BCs are newton the sum of all coefficients divided by the length of the network should be close to 1", np.sum(prob.B_matrix.toarray())/net.L)
@@ -117,23 +117,30 @@ prob.s=sol[:-prob.S]
 prob.q=sol[-prob.S:]
 prob.Cv=C_v_array
 res=100
-
+#%%
 corners=np.array([[0,0.5,0], [0,0.5,1],[1,0.5,0], [1,0.5,1]])*L_vessel
-kk=GetPlaneReconstructionFast(240,1, 0, 2,  corners, res, prob)
-plt.imshow(kk[0])
+kk=GetPlaneReconstructionFast(240,1, 0, 2,  corners, res, prob,prob.Cv)
+plt.imshow(kk[0], origin="lower", extent=[0,L[0],0,L[2]])
+plt.xlabel("x")
+plt.ylabel("z")
 plt.colorbar()
 plt.show()
 
 #%%
 corners=np.array([[0,0,0.5], [0,1,0.5],[1,0,0.5], [1,1,0.5]])*L_vessel
-kk=GetPlaneReconstructionFast(240,2, 0, 1,  corners, res, prob)
+pdb.set_trace()
+kk=GetPlaneReconstructionFast(240,2, 0, 1,  corners, res, prob, prob.Cv)
 plt.imshow(kk[0], origin="lower", extent=[0,L[0],0,L[1]])
+plt.xlabel("x")
+plt.ylabel("y")
 plt.colorbar()
 plt.show()
 #%%
 corners=np.array([[0.5,0,0],[0.5,0,1],[0.5,1,0],[0.5,1,1]])*L_vessel
-kk=GetPlaneReconstructionFast(240,0, 1, 2,  corners, res, prob)
+kk=GetPlaneReconstructionFast(240,0, 1, 2,  corners, res, prob, prob.Cv)
 plt.imshow(kk[0], origin="lower", extent=[0,L[1],0,L[2]])
+plt.xlabel("y")
+plt.ylabel("z")
 plt.colorbar()
 plt.show()
 

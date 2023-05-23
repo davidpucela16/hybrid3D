@@ -118,8 +118,10 @@ prob.Cv=C_v_array
 res=100
 
 corners=np.array([[0,240,0], [0,240,240],[240,240,0], [240,240,240]])
-kk=GetPlaneReconstructionFast(240,1, 0, 2,  corners, res, prob)
+kk=GetPlaneReconstructionFast(240,1, 0, 2,  corners, res, prob, prob.Cv)
 plt.imshow(kk[0])
+plt.xlabel("x")
+plt.ylabel("z")
 plt.colorbar()
 plt.show()
 
@@ -127,12 +129,16 @@ plt.show()
 corners=np.array([[0,0,120], [0,480,120],[240,0,120], [240,480,120]])
 kk=GetPlaneReconstructionFast(240,2, 0, 1,  corners, res, prob)
 plt.imshow(kk[0], origin="lower", extent=[0,L[0],0,L[1]])
+plt.xlabel("x")
+plt.ylabel("y")
 plt.colorbar()
 plt.show()
 #%%
 corners=np.array([[120,0,0],[120,0,240],[120,480,0],[120,480,240]])
 kk=GetPlaneReconstructionFast(240,0, 1, 2,  corners, res, prob)
 plt.imshow(kk[0], origin="lower", extent=[0,L[1],0,L[2]])
+plt.xlabel("y")
+plt.ylabel("z")
 plt.colorbar()
 plt.show()
 
