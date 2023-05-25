@@ -105,7 +105,7 @@ from numba import njit
 
 #%%
 class cart_mesh_3D():
-    def __init__(self, L, cells_x):
+    def __init__(self, L, cells_x, corner_0):
         """We only allow one h for all directions (cubic cells). Therefore cells_x
         is an integer"""
         h=L[0]/cells_x
@@ -116,9 +116,9 @@ class cart_mesh_3D():
         L[1], L[2]=cells_y*h, cells_z*h
         
         Lx, Ly, Lz=L
-        self.x=np.linspace(h/2, Lx- h/2, cells_x)
-        self.y=np.linspace(h/2, Ly-h/2, cells_y)
-        self.z=np.linspace(h/2, Lz-h/2, cells_z)
+        self.x=np.linspace(h/2, Lx- h/2, cells_x)+corner_0[0]
+        self.y=np.linspace(h/2, Ly-h/2, cells_y)+corner_0[1]
+        self.z=np.linspace(h/2, Lz-h/2, cells_z)+corner_0[2]
         
         self.mesh=[self.x,self.y,self.z]
         
